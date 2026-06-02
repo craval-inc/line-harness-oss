@@ -66,7 +66,8 @@ import { autoReplies } from './routes/auto-replies.js';
 import booking from './routes/booking.js';
 import events from './routes/events.js';
 import { trafficPools } from './routes/traffic-pools.js';
-import { meetCallback } from './routes/meet-callback.js';
+// [Craval security C-1] meet-callback は完全無認証で任意のFlexメッセージを送信可能 (CRITICAL)。Meet Harness連携を使わないため無効化。
+// import { meetCallback } from './routes/meet-callback.js';
 import { messageTemplates } from './routes/message-templates.js';
 import dedupPreview from './routes/dedup-preview.js';
 import { profileRefresh } from './routes/profile-refresh.js';
@@ -107,6 +108,10 @@ export type Env = {
     WORKER_PUBLIC_URL?: string;
     ADMIN_PUBLIC_URL?: string;
     LIFF_PUBLIC_URL?: string;
+    // [Craval security C-3] CORSをadmin/LIFF originに制限するためのvar。
+    // 未設定時は '*' にフォールバックするが、本番では必ず設定する。
+    // 複数origin指定する場合はカンマ区切り。例: "https://admin.example.com,https://liff.example.com"
+    ADMIN_ORIGIN?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -115,8 +120,20 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — allow all origins for MVP
-app.use('*', cors({ origin: '*' }));
+// [Craval security C-3] CORS — env.ADMIN_ORIGIN で許可originを制限。
+// 未設定時のみ '*' フォールバック（dev用）。本番ではwrangler.toml or `wrangler secret put ADMIN_ORIGIN` で設定する。
+// /webhook はCORSの影響を受けない（LINEからのサーバ間呼び出し）ので問題なし。
+app.use('*', (c, next) => {
+  const allowed = c.env.ADMIN_ORIGIN;
+  if (!allowed) {
+    return cors({ origin: '*' })(c, next);
+  }
+  const origins = allowed.split(',').map((s) => s.trim()).filter(Boolean);
+  return cors({
+    origin: (origin) => (origin && origins.includes(origin) ? origin : origins[0] || ''),
+    credentials: false,
+  })(c, next);
+});
 
 // Rate limiting — runs before auth to block abuse early
 app.use('*', rateLimitMiddleware);
@@ -165,7 +182,8 @@ app.route('/', trafficPools);
 app.route('/', booking);
 app.route('/', events);
 app.route('/', accountSettings);
-app.route('/', meetCallback);
+// [Craval security C-1] meet-callback 無効化 (上のimportコメントアウト参照)
+// app.route('/', meetCallback);
 app.route('/', messageTemplates);
 app.route('/', dedupPreview);
 app.route('/', profileRefresh);

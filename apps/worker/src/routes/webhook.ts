@@ -32,6 +32,16 @@ const webhook = new Hono<Env>();
 // 128 MB Cloudflare Workers memory ceiling.
 const MAX_WEBHOOK_BODY_SIZE = 1024 * 1024; // 1 MiB
 
+// [Craval security M-5] PII(line_user_id, displayName)をログに直接出さず、短いhash prefixで出力。
+// CFのLogpush経由でPIIがログ集約サービスに流出するのを防ぐ。デバッグに必要な相関は取れる。
+async function hashPIIPrefix(value: string | null | undefined): Promise<string> {
+  if (!value) return 'null';
+  const data = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const hex = Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 12); // 12 hex chars = 48bits、相関には十分・逆引きほぼ不可
+}
+
 webhook.post('/webhook', async (c) => {
   // Pre-read size guard: reject before reading the body if Content-Length is oversized.
   const contentLengthHeader = c.req.header('Content-Length');
@@ -60,8 +70,10 @@ webhook.post('/webhook', async (c) => {
   // for junk traffic on a public endpoint.
   const LINE_SIGNATURE_LENGTH = 44;
   if (signature.length !== LINE_SIGNATURE_LENGTH) {
+    // [Craval security C-2] 不正シグネチャは401で返す。
+    // 元実装は200を返してたが、CFのstatus_code集計で検知不能になりLINEの再送機構も無効化される。
     console.error('Missing or malformed LINE signature');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_signature' }, 401);
   }
 
   // Verify signature BEFORE JSON.parse so attacker-controlled bodies never reach the parser.
@@ -105,16 +117,18 @@ webhook.post('/webhook', async (c) => {
   }
 
   if (!valid) {
+    // [Craval security C-2] HMAC不一致も401で返す（同上の理由）。
     console.error('Invalid LINE signature');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_signature' }, 401);
   }
 
   let body: WebhookRequestBody;
   try {
     body = JSON.parse(rawBody) as WebhookRequestBody;
   } catch {
+    // [Craval security C-2] パース不能は400で返す（不正ボディ）。
     console.error('Failed to parse webhook body');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_body' }, 400);
   }
 
   const lineClient = new LineClient(channelAccessToken);
@@ -150,17 +164,21 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    console.log(`[follow] userId=${userId} lineAccountId=${lineAccountId}`);
+    // [Craval security M-5] userId(=PII)をhash prefix化してログ出力
+    const userIdHash = await hashPIIPrefix(userId);
+    console.log(`[follow] userIdHash=${userIdHash} lineAccountId=${lineAccountId}`);
 
     // プロフィール取得 & 友だち登録/更新
     let profile;
     try {
       profile = await lineClient.getProfile(userId);
     } catch (err) {
-      console.error('Failed to get profile for', userId, err);
+      // [Craval security M-5] userIdをそのまま出さない
+      console.error(`Failed to get profile for userIdHash=${userIdHash}`, err);
     }
 
-    console.log(`[follow] profile=${profile?.displayName ?? 'null'}`);
+    // [Craval security M-5] displayNameはPIIなのでログ出力しない（取得成否のみ）
+    console.log(`[follow] profile_fetched=${profile ? 'ok' : 'fail'}`);
 
     const friend = await upsertFriend(db, {
       lineUserId: userId,
@@ -245,7 +263,8 @@ async function handleEvent(
                 const expandedContent = expandVariables(resolved.messageContent, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1]);
                 const message = buildMessage(resolved.messageType, expandedContent);
                 await lineClient.replyMessage(event.replyToken, [message]);
-                console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
+                // [Craval security M-5] userIdをhash prefix化
+                console.log(`Immediate delivery: sent step ${firstStep.id} to userIdHash=${await hashPIIPrefix(userId)}`);
 
                 // Log what was actually delivered (post buildMessage normalization)
                 // so the dashboard chat view mirrors LINE 1:1.
