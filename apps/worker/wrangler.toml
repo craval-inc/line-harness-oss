@@ -1,4 +1,4 @@
-name = "line-harness"
+name = "line-harness-sbo"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 # nodejs_compat is required by @line-harness/update-engine which pulls in
@@ -10,10 +10,11 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 # ═══════════════════════════════════════════════════════════════
-# デフォルト = テスト環境 (noda@)
+# Craval (yosuke-kato@craval.jp) — セールスBPO「セールスキャスト」用
+# Account: 48cf2f856a84ba4baca7b9e4484b50c1
 # 使い方: npx wrangler deploy
 # ═══════════════════════════════════════════════════════════════
-account_id = "YOUR_DEV_ACCOUNT_ID"
+account_id = "48cf2f856a84ba4baca7b9e4484b50c1"
 
 [assets]
 directory = "dist/client"
@@ -21,66 +22,42 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "line-harness"
-database_id = "YOUR_DEV_D1_DATABASE_ID"
+database_name = "line-harness-sbo"
+database_id = "c8a9c07f-ae70-4d3a-8f22-86fa0828238e"
 
 [[r2_buckets]]
 binding = "IMAGES"
-bucket_name = "line-harness-images"
+bucket_name = "line-harness-sbo-images"
 
 [triggers]
 crons = ["*/5 * * * *", "0 */6 * * *"]
 
 # ═══════════════════════════════════════════════════════════════
-# Phase 5 self-update vars — consumed by /admin/update/*. Secrets
-# (CF_API_TOKEN, ADMIN_API_KEY) must be set via `wrangler secret put`
-# and are intentionally absent from this file.
+# 環境変数 (Secrets は `wrangler secret put` で設定)
 # ═══════════════════════════════════════════════════════════════
 [vars]
-WORKER_NAME = "line-harness"
-ADMIN_PAGES_PROJECT = "line-harness-admin"
-LIFF_PAGES_PROJECT = "line-harness-liff"
-D1_DATABASE_ID = "YOUR_DEV_D1_DATABASE_ID"
-MANIFEST_URL = "https://github.com/Shudesu/line-harness-oss/releases/latest/download/release-manifest.json"
-WORKER_PUBLIC_URL = "https://line-harness.workers.dev"
-ADMIN_PUBLIC_URL = "https://line-harness-admin.pages.dev"
-LIFF_PUBLIC_URL = "https://line-harness-liff.pages.dev"
-CF_ACCOUNT_ID = "YOUR_DEV_ACCOUNT_ID"
+WORKER_NAME = "line-harness-sbo"
+ADMIN_PAGES_PROJECT = "line-harness-sbo-admin"
+LIFF_PAGES_PROJECT = "line-harness-sbo-liff"
+D1_DATABASE_ID = "c8a9c07f-ae70-4d3a-8f22-86fa0828238e"
+# Phase 5 self-update を無効化したい場合、MANIFEST_URLを空に。
+# 本家からの自動アップデートはセキュリティ的に好ましくない（M-2参照）ので
+# 当面は無効化方針 — 必要になったら自社GitHub releaseに差し替える。
+MANIFEST_URL = ""
+WORKER_PUBLIC_URL = "https://line-harness-sbo.craval.workers.dev"
+ADMIN_PUBLIC_URL = "https://line-harness-sbo-admin.pages.dev"
+LIFF_PUBLIC_URL = "https://line-harness-sbo-liff.pages.dev"
+CF_ACCOUNT_ID = "48cf2f856a84ba4baca7b9e4484b50c1"
 
-# ═══════════════════════════════════════════════════════════════
-# 本番環境
-# 使い方: npx wrangler deploy --env production --name your-worker-name
-# D1:     npx wrangler d1 execute line-crm --env production --remote --file ...
-# ═══════════════════════════════════════════════════════════════
-[env.production]
-account_id = "YOUR_ACCOUNT_ID"
-
-[env.production.assets]
-directory = "dist/client"
-binding = "ASSETS"
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "line-crm"
-database_id = "YOUR_D1_DATABASE_ID"
-
-[[env.production.r2_buckets]]
-binding = "IMAGES"
-bucket_name = "line-harness-images"
-
-[env.production.triggers]
-crons = ["*/5 * * * *", "0 */6 * * *"]
-
-# Phase 5 self-update vars for production. Worker / Pages / D1 names point at
-# the prod resources. Secrets (CF_API_TOKEN, ADMIN_API_KEY) live in the
-# production secret store, set via `wrangler secret put --env production`.
-[env.production.vars]
-WORKER_NAME = "your-worker-name"
-ADMIN_PAGES_PROJECT = "line-harness-admin"
-LIFF_PAGES_PROJECT = "line-harness-liff"
-D1_DATABASE_ID = "YOUR_D1_DATABASE_ID"
-MANIFEST_URL = "https://github.com/Shudesu/line-harness-oss/releases/latest/download/release-manifest.json"
-WORKER_PUBLIC_URL = "https://your-worker-name.workers.dev"
-ADMIN_PUBLIC_URL = "https://line-harness-admin.pages.dev"
-LIFF_PUBLIC_URL = "https://line-harness-liff.pages.dev"
-CF_ACCOUNT_ID = "YOUR_ACCOUNT_ID"
+# Secrets (要 `wrangler secret put`):
+#   LINE_CHANNEL_SECRET            # セールスキャストのChannel secret
+#   LINE_CHANNEL_ACCESS_TOKEN      # セールスキャストのLong-lived token
+#   LINE_CHANNEL_ID                # セールスキャストのMessaging API Channel ID = 2010243858
+#   LINE_LOGIN_CHANNEL_ID          # LINE Login用チャネル（別途作成必要）
+#   LINE_LOGIN_CHANNEL_SECRET      # 同上
+#   API_KEY                        # 管理画面アクセス用Bearer token (openssl rand -hex 32)
+#   LIFF_URL                       # LIFFアプリのURL
+#   WORKER_URL                     # https://line-harness-sbo.craval.workers.dev
+#   ADMIN_ORIGIN                   # CORS制限 (例: https://line-harness-sbo-admin.pages.dev)
+#   ADMIN_API_KEY                  # /admin/update/* 用 (32byte hex)
+#   CF_API_TOKEN                   # /admin/update/* がCF API呼ぶ用
