@@ -87,20 +87,24 @@ stripe.post('/api/integrations/stripe/webhook', async (c) => {
     const stripeSecret = (c.env as unknown as Record<string, string | undefined>).STRIPE_WEBHOOK_SECRET;
     let body: StripeWebhookBody;
 
-    if (stripeSecret) {
-      // 署名検証モード（本番環境）
-      const sigHeader = c.req.header('Stripe-Signature') ?? '';
-      const rawBody = await c.req.text();
-
-      const valid = await verifyStripeSignature(stripeSecret, rawBody, sigHeader);
-      if (!valid) {
-        return c.json({ success: false, error: 'Stripe signature verification failed' }, 401);
-      }
-      body = JSON.parse(rawBody) as StripeWebhookBody;
-    } else {
-      // シークレット未設定（開発環境向け）
-      body = await c.req.json<StripeWebhookBody>();
+    // [Craval security H-4] STRIPE_WEBHOOK_SECRET 未設定時は署名検証をスキップせず 503 で拒否する。
+    // 未設定のまま公開すると誰でも偽の Stripe イベントを注入できるため、
+    // 「未設定＝未検証で処理」は不可。Stripe を使わないテナントは 503 のままで安全側に倒れる。
+    if (!stripeSecret) {
+      return c.json(
+        { success: false, error: 'Stripe webhook is not configured (STRIPE_WEBHOOK_SECRET unset)' },
+        503,
+      );
     }
+    // 署名検証モード（本番環境）
+    const sigHeader = c.req.header('Stripe-Signature') ?? '';
+    const rawBody = await c.req.text();
+
+    const valid = await verifyStripeSignature(stripeSecret, rawBody, sigHeader);
+    if (!valid) {
+      return c.json({ success: false, error: 'Stripe signature verification failed' }, 401);
+    }
+    body = JSON.parse(rawBody) as StripeWebhookBody;
 
     // 冪等性チェック
     const existing = await getStripeEventByStripeId(c.env.DB, body.id);

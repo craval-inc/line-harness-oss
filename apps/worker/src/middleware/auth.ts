@@ -2,6 +2,17 @@ import type { Context, Next } from 'hono';
 import { getStaffByApiKey } from '@line-crm/db';
 import type { Env } from '../index.js';
 
+// [Craval security M-2] APIキー照合はタイミングオラクルを避けるため定数時間比較を使う。
+// 長さ不一致は即 false（キー長は機密性が低い）だが、値の比較は早期 return しない。
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
   // Skip auth for the LINE webhook endpoint — it uses signature verification instead
   // Skip auth for OpenAPI docs — public documentation
@@ -69,7 +80,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   // Fallback: env API_KEY acts as owner (current rotation slot)
-  if (token === c.env.API_KEY) {
+  if (c.env.API_KEY && safeEqual(token, c.env.API_KEY)) {
     c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
     return next();
   }
@@ -84,7 +95,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   if (
     c.env.LEGACY_API_KEY &&
     c.env.LEGACY_API_KEY !== c.env.API_KEY &&
-    token === c.env.LEGACY_API_KEY
+    safeEqual(token, c.env.LEGACY_API_KEY)
   ) {
     c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
     console.log('[auth] accept_via=LEGACY_API_KEY');

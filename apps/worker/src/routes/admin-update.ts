@@ -103,10 +103,20 @@ function adaptD1(db: D1Database): D1Like {
   };
 }
 
+// [Craval security M-2] 定数時間比較（タイミングオラクル防止）。
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 /** Auth gate — single source of truth for every endpoint in this router. */
 app.use('/*', async (c, next) => {
   const key = c.req.header('x-admin-api-key');
-  if (!key || key !== c.env.ADMIN_API_KEY) {
+  if (!key || !c.env.ADMIN_API_KEY || !safeEqual(key, c.env.ADMIN_API_KEY)) {
     return c.text('unauthorized', 401);
   }
   await next();
