@@ -1100,15 +1100,48 @@ liffRoutes.get('/api/liff/config', async (c) => {
 
 // ─── Existing LIFF endpoints ────────────────────────────────────
 
-// POST /api/liff/profile - get friend by LINE userId (public, no auth)
+// POST /api/liff/profile - get the caller's OWN friend record.
+// [Craval security H-7] client 指定の lineUserId は信用せず、LIFF idToken を検証して
+// その sub から lineUserId を導出する（なりすまし/IDOR で他人の表示名・フォロー状態を
+// 引ける穴を塞ぐ）。フロント(apps/liff)は全 /api/liff/* 呼び出しに Bearer idToken を
+// 付与するため後方互換。body.idToken も受理する。
 liffRoutes.post('/api/liff/profile', async (c) => {
   try {
-    const body = await c.req.json<{ lineUserId: string }>();
-    if (!body.lineUserId) {
-      return c.json({ success: false, error: 'lineUserId is required' }, 400);
+    const authHeader = c.req.header('Authorization') || '';
+    let idToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
+    if (!idToken) {
+      const body = await c.req.json<{ idToken?: string }>().catch(() => ({}) as { idToken?: string });
+      idToken = body.idToken || '';
+    }
+    if (!idToken) {
+      return c.json({ success: false, error: 'idToken is required' }, 401);
     }
 
-    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    // idToken を LINE で検証（default Login channel → DB accounts の順）
+    const loginChannelIds = [c.env.LINE_LOGIN_CHANNEL_ID];
+    const dbAccounts = await getLineAccounts(c.env.DB);
+    for (const acct of dbAccounts) {
+      if (acct.login_channel_id && !loginChannelIds.includes(acct.login_channel_id)) {
+        loginChannelIds.push(acct.login_channel_id);
+      }
+    }
+    let verifyRes: Response | null = null;
+    for (const channelId of loginChannelIds) {
+      if (!channelId) continue;
+      verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ id_token: idToken, client_id: channelId }),
+      });
+      if (verifyRes.ok) break;
+    }
+    if (!verifyRes?.ok) {
+      return c.json({ success: false, error: 'Invalid idToken' }, 401);
+    }
+    const verified = await verifyRes.json<{ sub: string }>();
+    const lineUserId = verified.sub;
+
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
     if (!friend) {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
