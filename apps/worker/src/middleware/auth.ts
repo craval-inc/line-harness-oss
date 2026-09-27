@@ -17,6 +17,19 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   // Skip auth for the LINE webhook endpoint — it uses signature verification instead
   // Skip auth for OpenAPI docs — public documentation
   const path = new URL(c.req.url).pathname;
+
+  // [Craval kzn] PUBLIC_PATHS_ALLOW 設定時は、認証不要で到達できるパスを許可リストだけに絞る。
+  // - 許可リスト内（完全一致）: 従来どおり（/webhook は署名検証に任せる）
+  // - /api/ 以外: 404（LIFF/管理画面アセット・/auth・/setup・/images・/t・/r・/pool・/admin 等を閉じる）
+  // - /api/*: 公開例外（/api/liff/・forms submit・stripe webhook 等）を無視して Bearer 必須
+  // 未設定なら何もしない＝従来と同一挙動。
+  const allowList = parsePublicPathsAllow(c.env?.PUBLIC_PATHS_ALLOW);
+  if (allowList) {
+    if (allowList.includes(path)) return next();
+    if (!path.startsWith('/api/')) return c.json({ success: false, error: 'Not Found' }, 404);
+    return requireBearer(c, next);
+  }
+
   // LIFF / admin の SPA アセットは Authorization ヘッダなしで HTML を取りに
   // くる。Worker は API 以外のパスを ASSETS バインディングから配信するので、
   // /api/ で始まらないパスは認証 skip して static asset として返す。
@@ -65,6 +78,18 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     return next();
   }
 
+  return requireBearer(c, next);
+}
+
+/** [Craval kzn] PUBLIC_PATHS_ALLOW をパース。未設定・空なら null（＝機能オフ）。 */
+export function parsePublicPathsAllow(raw: string | undefined): string[] | null {
+  if (!raw) return null;
+  const list = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 ? list : null;
+}
+
+/** Bearer（staff api_key / env API_KEY / LEGACY_API_KEY）で認証する。 */
+async function requireBearer(c: Context<Env>, next: Next): Promise<Response | void> {
   const authHeader = c.req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
