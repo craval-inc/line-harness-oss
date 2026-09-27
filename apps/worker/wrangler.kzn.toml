@@ -51,14 +51,17 @@ LIFF_URL = ""
 CF_ACCOUNT_ID = "01547b03881149dd0db10da0da6928c8"
 
 # [Craval kzn] Phase 1 の安全設定（設計書 §4 / §5-1）
-PUBLIC_PATHS_ALLOW = "/webhook"
+PUBLIC_PATHS_ALLOW = "/webhook,/api/auth/login,/api/auth/logout"
+# 管理画面は line-harness-kzn-admin.pages.dev（別サイト）= SameSite=None Cookie。Safari 不可・Chrome 可。
+# DNS 権限が取れたら lh-admin/lh-api.anami-pat.jp の同一サイト構成へ移す（ADMIN_ALLOW_CROSS_SITE を外す）。
+ADMIN_ALLOW_CROSS_SITE = "true"
 # 管理画面（apps/web・httpOnly Cookie 認証）を出す時は、Cookie ログイン用の2パスを許可リストに足し、
 # ADMIN_ORIGIN（管理画面の origin）を設定する。推奨は anami-pat.jp 配下の同一サイト構成:
 #   PUBLIC_PATHS_ALLOW = "/webhook,/api/auth/login,/api/auth/logout"
 #   ADMIN_ORIGIN       = "https://lh-admin.anami-pat.jp"   # Pages カスタムドメイン
 #   WORKER_URL(secret) = "https://lh-api.anami-pat.jp"     # Worker カスタムドメイン（同一サイト→SameSite=Lax）
 # *.pages.dev ↔ *.workers.dev のままだとクロスサイトになり ADMIN_COOKIE_SAMESITE="None" と
-# ADMIN_ALLOW_CROSS_SITE="1" が必要（サードパーティ Cookie 依存・Safari では動かない）。
+# ADMIN_ALLOW_CROSS_SITE="true" が必要（サードパーティ Cookie 依存・Safari では動かない）。
 INCOMING_IMAGE_STORE = "0"
 WEBHOOK_INBOX = "1"
 LINE_SEND_DISABLED = "1"
@@ -75,4 +78,4 @@ MIRROR_URL = "https://anami-pat.jp/api/line-harness-event"
 #   WORKER_URL                     # https://line-harness-kzn.bkobu-yd.workers.dev
 #   MIRROR_SECRET                  # きずな Pages の LINE_HARNESS_MIRROR_SECRET と同値。**必須**（未設定だと転送は保留＝mirrored=0 のまま溜まる）
 # 設定しない: LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET / STRIPE_* / CF_API_TOKEN
-# 管理画面を出すまで設定しない: ADMIN_ORIGIN / ADMIN_COOKIE_SAMESITE / ADMIN_ALLOW_CROSS_SITE
+# ADMIN_ORIGIN は secret（https://line-harness-kzn-admin.pages.dev）。ADMIN_COOKIE_SAMESITE は未設定（ALLOW_CROSS_SITE=true で None になる）
