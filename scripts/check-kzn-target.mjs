@@ -7,7 +7,8 @@
  *   - name / D1 database_name が "-kzn" で終わる
  *   - database_id がプレースホルダのまま（TBD_）でない
  *   - Phase 1 の安全設定（PUBLIC_PATHS_ALLOW="/webhook" / INCOMING_IMAGE_STORE="0" /
- *     WEBHOOK_INBOX="1" / LINE_SEND_DISABLED="1"）が入っている
+ *     WEBHOOK_INBOX="1" / LINE_SEND_DISABLED="1" / EVENT_BUS_DISABLED="1"）が入っている
+ *   - MIRROR_URL があれば、MIRROR_SECRET を secret で入れる必要がある旨を表示（secret は静的に検査できない）
  *   - R2 バインディング（[[r2_buckets]]）が無い
  *   - packages/line-sdk/dist に送信禁止ガード（setLineSendDisabled）が含まれている
  *     （wrangler は import 条件で dist を読むため、未ビルドだとガード無しでデプロイされる）
@@ -70,6 +71,7 @@ if (!existsSync(tomlPath)) {
     INCOMING_IMAGE_STORE: '0',
     WEBHOOK_INBOX: '1',
     LINE_SEND_DISABLED: '1',
+    EVENT_BUS_DISABLED: '1',
   };
   for (const [key, want] of Object.entries(expectedVars)) {
     const got = tableValue(toml, 'vars', key);
@@ -77,6 +79,14 @@ if (!existsSync(tomlPath)) {
   }
   const d1IdVar = tableValue(toml, 'vars', 'D1_DATABASE_ID');
   if (d1IdVar !== dbId) errors.push(`[vars] D1_DATABASE_ID (${d1IdVar}) must equal database_id (${dbId})`);
+
+  if (tableValue(toml, 'vars', 'MIRROR_URL')) {
+    if (tableValue(toml, 'vars', 'MIRROR_SECRET') !== null) {
+      errors.push('MIRROR_SECRET must not be in [vars] (plaintext) — set it with `wrangler secret put MIRROR_SECRET -c wrangler.kzn.toml`');
+    } else {
+      console.log('[check-kzn-target] NOTE: MIRROR_URL is set — MIRROR_SECRET must be set as a secret (`npx wrangler secret list -c wrangler.kzn.toml` で確認)。未設定だと転送は保留され mirrored=0 のまま溜まる');
+    }
+  }
 
   if (/^\s*\[\[r2_buckets\]\]/m.test(toml)) errors.push('R2 binding must not exist in kzn (incoming images are not stored)');
 }

@@ -6,7 +6,8 @@
  * - 処理(processed)と外部ミラー転送(mirrored)は別フラグ。途中失敗は Cron が再処理・再転送する。
  * - unsend は unsent_messages に記録し、保存済み本文（messages_log / webhook_inbox）を置換する。
  *   取消が元メッセージより先に届いても、後から本文を保存しない。
- * - follow/unfollow はイベント時刻で条件付き更新し、古いイベントで友だち状態を巻き戻さない。
+ * - follow/unfollow は friend_follow_state にイベント時刻付きで原子的に記録し、friends.is_following はそこから同期する
+ *   （古いイベント・処理中の割り込み・友だち未登録の unfollow でも状態を巻き戻さない）。
  */
 import type { WebhookEvent } from '@line-crm/line-sdk';
 
@@ -29,8 +30,23 @@ export function inboxEnabled(env: InboxEnv): boolean {
   return env.WEBHOOK_INBOX === '1';
 }
 
+/** 転送が「意図されている」か（MIRROR_URL あり）。鍵が無くても true＝行は未転送(mirrored=0)で保持する。 */
 export function mirrorEnabled(env: InboxEnv): boolean {
-  return inboxEnabled(env) && !!env.MIRROR_URL && !!env.MIRROR_SECRET;
+  return inboxEnabled(env) && !!env.MIRROR_URL;
+}
+
+/** 実際に転送できるか（URL と鍵の両方あり）。 */
+export function mirrorReady(env: InboxEnv): boolean {
+  return mirrorEnabled(env) && !!env.MIRROR_SECRET;
+}
+
+let mirrorConfigWarned = false;
+/** MIRROR_URL あり・MIRROR_SECRET なしの設定不備を isolate ごとに1回だけ警告する。 */
+export function warnMirrorMisconfigOnce(env: InboxEnv): void {
+  if (mirrorEnabled(env) && !env.MIRROR_SECRET && !mirrorConfigWarned) {
+    mirrorConfigWarned = true;
+    console.error('[webhook-inbox] MIRROR_URL is set but MIRROR_SECRET is missing — mirror is paused (rows kept with mirrored=0)');
+  }
 }
 
 type LooseEvent = WebhookEvent & {
@@ -103,10 +119,27 @@ export async function saveInboxEvents(
         opts.now,
       );
   });
+  // 取消が先着していたメッセージは、保存と同じトランザクション内で本文を伏せる（処理の成否に依存しない）。
+  const ids = tracked.map((e) => webhookEventIdOf(e));
+  stmts.push(
+    db
+      .prepare(
+        `UPDATE webhook_inbox
+            SET body_json = ${REDACT_BODY_SQL}
+          WHERE event_type = 'message'
+            AND webhook_event_id IN (${ids.map(() => '?').join(', ')})
+            AND line_message_id IN (SELECT line_message_id FROM unsent_messages)`,
+      )
+      .bind(UNSENT_PLACEHOLDER, ...ids),
+  );
   const results = await db.batch(stmts);
   const fresh = tracked.filter((_, i) => (results[i]?.meta?.changes ?? 0) === 1);
   return { fresh, untracked };
 }
+
+/** webhook_inbox.body_json の message を id/type/伏字 text だけにする SQL 式（1番目の ? = 伏字）。 */
+const REDACT_BODY_SQL =
+  "json_set(body_json, '$.message', json_object('id', line_message_id, 'type', json_extract(body_json, '$.message.type'), 'text', ?))";
 
 export async function markProcessed(db: D1Database, webhookEventId: string, now: number): Promise<void> {
   await db
@@ -131,11 +164,11 @@ export async function applyUnsend(db: D1Database, lineMessageId: string, now: nu
     db
       .prepare(
         `UPDATE webhook_inbox
-            SET body_json = json_set(body_json, '$.message', json_object('id', ?, 'type', json_extract(body_json, '$.message.type'), 'text', ?)),
+            SET body_json = ${REDACT_BODY_SQL},
                 updated_at = ?
           WHERE line_message_id = ? AND event_type = 'message'`,
       )
-      .bind(lineMessageId, UNSENT_PLACEHOLDER, now, lineMessageId),
+      .bind(UNSENT_PLACEHOLDER, now, lineMessageId),
   ]);
 }
 
@@ -148,53 +181,87 @@ export async function isUnsent(db: D1Database, lineMessageId: string): Promise<b
 }
 
 /**
- * follow 反映の可否を判定し、反映するなら follow_state_at を先に進める（claim）。
- * - 'claimed'   : 既存友だちで、このイベントが最新 → 反映してよい
- * - 'stale'     : より新しい follow/unfollow が反映済み → 何もしない
- * - 'no_friend' : 友だち未登録 → 新規登録してよい（登録後に recordFollowState を呼ぶ）
- * 同一イベントの再処理（時刻が等しい）は反映可とする（途中失敗からの再開のため）。
+ * follow/unfollow を friend_follow_state に原子的に記録する（1文の UPSERT）。
+ * このイベントが既存の状態より新しい（同時刻＝同一イベントの再処理も含む）時だけ反映し true を返す。
+ * 友だち未登録でも記録されるので、未登録時の unfollow の後に届いた古い follow も弾ける。
  */
-export async function claimFollowState(
+export async function claimFollowTransition(
   db: D1Database,
   lineUserId: string,
+  following: boolean,
   eventTimestamp: number,
-): Promise<'claimed' | 'stale' | 'no_friend'> {
-  const res = await db
-    .prepare(
-      'UPDATE friends SET follow_state_at = ? WHERE line_user_id = ? AND (follow_state_at IS NULL OR follow_state_at <= ?)',
-    )
-    .bind(eventTimestamp, lineUserId, eventTimestamp)
-    .run();
-  if ((res.meta?.changes ?? 0) >= 1) return 'claimed';
-  const row = await db
-    .prepare('SELECT follow_state_at FROM friends WHERE line_user_id = ?')
-    .bind(lineUserId)
-    .first<{ follow_state_at: number | null }>();
-  return row ? 'stale' : 'no_friend';
-}
-
-export async function recordFollowState(db: D1Database, lineUserId: string, eventTimestamp: number): Promise<void> {
-  await db
-    .prepare(
-      'UPDATE friends SET follow_state_at = ? WHERE line_user_id = ? AND (follow_state_at IS NULL OR follow_state_at <= ?)',
-    )
-    .bind(eventTimestamp, lineUserId, eventTimestamp)
-    .run();
-}
-
-/** unfollow を時刻条件付きで反映する。より新しい follow が反映済みなら何もしない。 */
-export async function applyUnfollowIfNewer(
-  db: D1Database,
-  lineUserId: string,
-  eventTimestamp: number,
-  nowJst: string,
 ): Promise<boolean> {
   const res = await db
     .prepare(
-      `UPDATE friends SET is_following = 0, follow_state_at = ?, updated_at = ?
-        WHERE line_user_id = ? AND (follow_state_at IS NULL OR follow_state_at <= ?)`,
+      `INSERT INTO friend_follow_state (line_user_id, is_following, state_at) VALUES (?, ?, ?)
+       ON CONFLICT(line_user_id) DO UPDATE SET is_following = excluded.is_following, state_at = excluded.state_at
+        WHERE excluded.state_at >= friend_follow_state.state_at`,
     )
-    .bind(eventTimestamp, nowJst, lineUserId, eventTimestamp)
+    .bind(lineUserId, following ? 1 : 0, eventTimestamp)
+    .run();
+  return (res.meta?.changes ?? 0) >= 1;
+}
+
+/**
+ * friends.is_following を friend_follow_state の最新状態に合わせる（1文）。
+ * follow 処理中（プロフィール取得〜upsertFriend の間）に新しい unfollow が割り込んでも、
+ * 最後にこれを呼べば最新状態に収束する。
+ */
+export async function syncFriendFollowFromState(db: D1Database, lineUserId: string, nowJst: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE friends
+          SET is_following = (SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id),
+              updated_at = ?
+        WHERE line_user_id = ?
+          AND EXISTS (SELECT 1 FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id)
+          AND is_following IS NOT (SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id)`,
+    )
+    .bind(nowJst, lineUserId)
+    .run();
+}
+
+/**
+ * 受信ログを冪等に挿入する（WEBHOOK_INBOX 時）。
+ * - webhook_event_id / line_message_id の部分一意インデックスで重複を無視
+ * - 本文は挿入文の中で unsent_messages を参照して決める＝取消判定と挿入が原子的
+ * 挿入できたら true（false＝既に記録済み＝再処理）。
+ */
+export async function insertIncomingLog(
+  db: D1Database,
+  input: {
+    friendId: string;
+    messageType: string;
+    content: string;
+    source: string;
+    lineMessageId: string | null;
+    webhookEventId: string | null;
+    lineAccountId?: string | null;
+    createdAt: string;
+  },
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `INSERT OR IGNORE INTO messages_log
+         (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_message_id, webhook_event_id, line_account_id, created_at)
+       VALUES (?, ?, 'incoming', ?,
+               CASE WHEN ? IS NOT NULL AND EXISTS (SELECT 1 FROM unsent_messages WHERE line_message_id = ?) THEN ? ELSE ? END,
+               NULL, NULL, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      input.friendId,
+      input.messageType,
+      input.lineMessageId,
+      input.lineMessageId,
+      UNSENT_PLACEHOLDER,
+      input.content,
+      input.source,
+      input.lineMessageId,
+      input.webhookEventId,
+      input.lineAccountId ?? null,
+      input.createdAt,
+    )
     .run();
   return (res.meta?.changes ?? 0) >= 1;
 }
@@ -258,7 +325,8 @@ export async function hmacHex(secret: string, body: string): Promise<string> {
 export interface MirrorDeps {
   db: D1Database;
   url: string;
-  secret: string;
+  /** 未設定なら転送せず false（mirror_attempts は増やさない＝鍵設定後に Cron が拾う）。 */
+  secret: string | undefined;
   now?: () => number;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
@@ -269,6 +337,10 @@ export async function mirrorInboxRow(deps: MirrorDeps, row: { webhook_event_id: 
   const now = deps.now ?? Date.now;
   const fetchFn = deps.fetchFn ?? fetch;
   const { db } = deps;
+  if (!deps.secret) {
+    warnMirrorMisconfigOnce({ WEBHOOK_INBOX: '1', MIRROR_URL: deps.url });
+    return false;
+  }
   try {
     const event = JSON.parse(row.body_json) as WebhookEvent;
     const userId = lineUserIdOf(event);
@@ -358,7 +430,9 @@ export async function runInboxMaintenance(deps: MaintenanceDeps): Promise<Mainte
     else result.reprocessFailed++;
   }
 
-  if (deps.mirror) {
+  if (deps.mirror && !deps.mirror.secret) {
+    warnMirrorMisconfigOnce({ WEBHOOK_INBOX: '1', MIRROR_URL: deps.mirror.url });
+  } else if (deps.mirror) {
     const unmirrored = await db
       .prepare(
         `SELECT webhook_event_id, event_type, line_account_id, body_json FROM webhook_inbox

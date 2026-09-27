@@ -76,7 +76,8 @@ import adminVersion from './routes/admin-version.js';
 import adminUpdate from './routes/admin-update.js';
 import { webhookInboxAdmin } from './routes/webhook-inbox-admin.js';
 import { handleWebhookEvent, incomingImageBucket } from './routes/webhook.js';
-import { inboxEnabled, mirrorEnabled, runInboxMaintenance } from './services/webhook-inbox.js';
+import { inboxEnabled, mirrorEnabled, warnMirrorMisconfigOnce, runInboxMaintenance } from './services/webhook-inbox.js';
+import { setEventBusDisabled } from './services/event-bus.js';
 
 export type Env = {
   Bindings: {
@@ -122,6 +123,7 @@ export type Env = {
     LINE_SEND_DISABLED?: string;    // "1" で LINE メッセージ送信 API を全拒否
     MIRROR_URL?: string;            // 受信イベントの転送先（WEBHOOK_INBOX 時のみ）
     MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
+    EVENT_BUS_DISABLED?: string;    // "1" で fireEvent（送信Webhook/スコア/自動化）と auto_replies を停止
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -576,6 +578,7 @@ async function scheduled(
 ): Promise<void> {
   // [Craval kzn] LINE_SEND_DISABLED=1 なら Cron 経由の配信も含めて LINE 送信 API を拒否する。
   setLineSendDisabled(env.LINE_SEND_DISABLED === '1');
+  setEventBusDisabled(env.EVENT_BUS_DISABLED === '1');
 
   // Get all active accounts from DB
   const dbAccounts = await getLineAccounts(env.DB);
@@ -611,6 +614,7 @@ async function scheduled(
 
   // [Craval kzn] Webhook 受信箱: 未処理行の再処理・未転送行の再転送・保持期限切れの削除。
   if (inboxEnabled(env)) {
+    warnMirrorMisconfigOnce(env);
     try {
       const accountTokens = new Map<string, string>();
       for (const account of dbAccounts) {
@@ -629,10 +633,10 @@ async function scheduled(
             env.WORKER_URL,
             env.LIFF_URL,
             incomingImageBucket(env),
-            { inbox: true },
+            { inbox: true, eventBusDisabled: env.EVENT_BUS_DISABLED === '1' },
           );
         },
-        mirror: mirrorEnabled(env) ? { url: env.MIRROR_URL!, secret: env.MIRROR_SECRET! } : null,
+        mirror: mirrorEnabled(env) ? { url: env.MIRROR_URL!, secret: env.MIRROR_SECRET } : null,
       });
       if (result.reprocessed + result.reprocessFailed + result.remirrored + result.remirrorFailed + result.purged > 0) {
         console.log(`[webhook-inbox] ${JSON.stringify(result)}`);
@@ -718,6 +722,7 @@ export default {
   // 未設定なら false＝従来と同一挙動。
   fetch: (request: Request, env: Env['Bindings'], ctx: ExecutionContext) => {
     setLineSendDisabled(env?.LINE_SEND_DISABLED === '1');
+    setEventBusDisabled(env?.EVENT_BUS_DISABLED === '1');
     return app.fetch(request, env, ctx);
   },
   scheduled,

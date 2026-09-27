@@ -56,4 +56,18 @@ describe('LINE_SEND_DISABLED', () => {
     await worker.fetch(new Request('https://kzn.example/api/health'), { DB: {} } as never, ctx);
     expect(isLineSendDisabled()).toBe(false);
   });
+
+  test('Worker 入口: env.EVENT_BUS_DISABLED="1" で fireEvent が何もしない（DB に触れない）', async () => {
+    const worker = (await import('../index.js')).default;
+    const { fireEvent, isEventBusDisabled, setEventBusDisabled } = await import('./event-bus.js');
+    const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn(), props: {} } as unknown as ExecutionContext;
+    await worker.fetch(new Request('https://kzn.example/api/health'), { EVENT_BUS_DISABLED: '1', DB: {} } as never, ctx);
+    expect(isEventBusDisabled()).toBe(true);
+    const db = { prepare: vi.fn(() => { throw new Error('must not touch DB'); }) } as unknown as D1Database;
+    await expect(fireEvent(db, 'message_received', { friendId: 'f1', eventData: { text: 'x' } })).resolves.toBeUndefined();
+    expect(db.prepare).not.toHaveBeenCalled();
+    await worker.fetch(new Request('https://kzn.example/api/health'), { DB: {} } as never, ctx);
+    expect(isEventBusDisabled()).toBe(false);
+    setEventBusDisabled(false);
+  });
 });

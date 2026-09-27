@@ -24,6 +24,18 @@ import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { sendAdConversions } from './ad-conversion.js';
 
+// [Craval kzn] EVENT_BUS_DISABLED=1 の環境では fireEvent を丸ごと無効化する（送信Webhook・スコア・自動化・
+// automation_logs 保存を行わない）。Worker の fetch/scheduled 入口で env から毎回反映。未設定なら従来どおり。
+let eventBusDisabled = false;
+
+export function setEventBusDisabled(disabled: boolean): void {
+  eventBusDisabled = disabled;
+}
+
+export function isEventBusDisabled(): boolean {
+  return eventBusDisabled;
+}
+
 export interface EventPayload {
   friendId?: string;
   eventData?: Record<string, unknown>;
@@ -48,6 +60,7 @@ export async function fireEvent(
   lineAccessToken?: string,
   lineAccountId?: string | null,
 ): Promise<void> {
+  if (eventBusDisabled) return;
   // Phase 1: fire webhooks, apply scoring rules, and ad conversion postback concurrently.
   const phase1: Promise<unknown>[] = [
     fireOutgoingWebhooks(db, eventType, payload),

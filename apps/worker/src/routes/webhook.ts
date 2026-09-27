@@ -24,14 +24,16 @@ import { fireEvent } from '../services/event-bus.js';
 import {
   inboxEnabled,
   mirrorEnabled,
+  mirrorReady,
+  warnMirrorMisconfigOnce,
   saveInboxEvents,
   processInboxEvent,
   mirrorInboxRow,
   webhookEventIdOf,
   isUnsent,
-  claimFollowState,
-  recordFollowState,
-  applyUnfollowIfNewer,
+  claimFollowTransition,
+  syncFriendFollowFromState,
+  insertIncomingLog,
   UNSENT_PLACEHOLDER,
 } from '../services/webhook-inbox.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
@@ -150,7 +152,11 @@ webhook.post('/webhook', async (c) => {
   const r2 = incomingImageBucket(c.env);
 
   // [Craval kzn] WEBHOOK_INBOX=1: 生イベントを同期保存してから 200。保存失敗は 500（LINE 再送対象）。
+  // [Craval kzn] EVENT_BUS_DISABLED=1: fireEvent と auto_replies を止める（未設定なら従来どおり）。
+  const eventBusDisabled = c.env.EVENT_BUS_DISABLED === '1';
+
   if (inboxEnabled(c.env)) {
+    warnMirrorMisconfigOnce(c.env);
     let saved: Awaited<ReturnType<typeof saveInboxEvents>>;
     try {
       saved = await saveInboxEvents(db, body.events ?? [], {
@@ -164,12 +170,12 @@ webhook.post('/webhook', async (c) => {
     }
 
     const process = (event: WebhookEvent) =>
-      handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2, { inbox: true });
+      handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2, { inbox: true, eventBusDisabled });
 
     const inboxPromise = (async () => {
       for (const event of saved.fresh) {
         await processInboxEvent(db, event, matchedAccountId, (e) => process(e));
-        if (mirrorEnabled(c.env)) {
+        if (mirrorReady(c.env)) {
           const row = await db
             .prepare('SELECT webhook_event_id, body_json, mirrored FROM webhook_inbox WHERE webhook_event_id = ?')
             .bind(webhookEventIdOf(event))
@@ -195,7 +201,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2, { eventBusDisabled });
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -216,6 +222,8 @@ export function incomingImageBucket(env: { INCOMING_IMAGE_STORE?: string; IMAGES
 export interface HandleEventOptions {
   /** [Craval kzn] WEBHOOK_INBOX 経由の処理。重複挿入防止・送信取消・follow 時刻条件を有効にする。 */
   inbox?: boolean;
+  /** [Craval kzn] EVENT_BUS_DISABLED=1。fireEvent・auto_replies・クロスアカウント送信を行わない。 */
+  eventBusDisabled?: boolean;
 }
 
 /** Cron の受信箱再処理から呼ぶための公開エントリ（handleEvent と同一）。 */
@@ -245,20 +253,21 @@ async function handleEvent(
   options: HandleEventOptions = {},
 ): Promise<void> {
   const inbox = options.inbox === true;
+  const eventBusDisabled = options.eventBusDisabled === true;
   const eventTimestamp = (event as { timestamp?: number }).timestamp;
+  const webhookEventId = (event as { webhookEventId?: string }).webhookEventId ?? null;
   if (event.type === 'follow') {
     const userId =
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    // [Craval kzn] より新しい follow/unfollow が反映済みなら、古い follow で状態を巻き戻さない。
-    let followClaim: 'claimed' | 'stale' | 'no_friend' | null = null;
-    if (inbox && typeof eventTimestamp === 'number') {
-      followClaim = await claimFollowState(db, userId, eventTimestamp);
-      if (followClaim === 'stale') {
-        console.log('[follow] skipped stale follow event (newer state already applied)');
-        return;
-      }
+    // [Craval kzn] follow 状態をイベント時刻付きで原子的に記録。より新しい状態があれば何もしない
+    // （友だち未登録時の unfollow も friend_follow_state に残っているので、古い follow はここで弾かれる）。
+    const followGuard = inbox && typeof eventTimestamp === 'number';
+    if (followGuard && !(await claimFollowTransition(db, userId, true, eventTimestamp))) {
+      await syncFriendFollowFromState(db, userId, jstNow());
+      console.log('[follow] skipped stale follow event (newer state already applied)');
+      return;
     }
 
     // [Craval security M-5] userId(=PII)をhash prefix化してログ出力
@@ -283,9 +292,9 @@ async function handleEvent(
       pictureUrl: profile?.pictureUrl ?? null,
       statusMessage: profile?.statusMessage ?? null,
     });
-    if (followClaim === 'no_friend' && typeof eventTimestamp === 'number') {
-      await recordFollowState(db, userId, eventTimestamp);
-    }
+    // [Craval kzn] upsertFriend は無条件で is_following=1 にするため、プロフィール取得中などに
+    // 新しい unfollow が割り込んでいても最新状態へ戻す。
+    if (followGuard) await syncFriendFollowFromState(db, userId, jstNow());
 
     console.log(`[follow] friend.id=${friend.id} friend.line_account_id=${(friend as any).line_account_id}`);
 
@@ -439,7 +448,7 @@ async function handleEvent(
     }
 
     // イベントバス発火: friend_add（replyToken は Step 0 で使用済みの可能性あり）
-    await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken, lineAccountId);
+    if (!eventBusDisabled) await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken, lineAccountId);
     return;
   }
 
@@ -450,7 +459,8 @@ async function handleEvent(
 
     // [Craval kzn] 受信箱経由はイベント時刻で条件付き更新（古い unfollow で新しい follow を巻き戻さない）。
     if (inbox && typeof eventTimestamp === 'number') {
-      await applyUnfollowIfNewer(db, userId, eventTimestamp, jstNow());
+      await claimFollowTransition(db, userId, false, eventTimestamp);
+      await syncFriendFollowFromState(db, userId, jstNow());
       return;
     }
     await updateFriendFollowStatus(db, userId, false);
@@ -487,16 +497,26 @@ async function handleEvent(
      // 利用者が "コスト比較" などのアクションを起こした事実を chat 履歴で可視化する。
      // delivery_type='push' は厳密には push ではないが、incoming/non-test として
      // 既存 chat list / 詳細 SQL のフィルタを通すための妥当な値 (auto_reply text 同様)。
-    try {
-      await db
-        .prepare(
-          `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_account_id, created_at)
-           VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'postback', ?, ?)`,
-        )
-        .bind(crypto.randomUUID(), friend.id, postbackData, lineAccountId ?? null, jstNow())
-        .run();
-    } catch (err) {
-      console.error('Failed to log incoming postback', err);
+    if (inbox) {
+      // [Craval kzn] webhookEventId で冪等に記録（再処理で重複しない）。失敗は再処理に回すため投げる。
+      await insertIncomingLog(db, {
+        friendId: friend.id, messageType: 'text', content: postbackData, source: 'postback',
+        lineMessageId: null, webhookEventId, lineAccountId: lineAccountId ?? null, createdAt: jstNow(),
+      });
+      if (eventBusDisabled) return;
+    } else {
+      try {
+        await db
+          .prepare(
+            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_account_id, created_at)
+             VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'postback', ?, ?)`,
+          )
+          .bind(crypto.randomUUID(), friend.id, postbackData, lineAccountId ?? null, jstNow())
+          .run();
+      } catch (err) {
+        console.error('Failed to log incoming postback', err);
+      }
+      if (eventBusDisabled) return;
     }
 
     for (const rule of autoReplies.results) {
@@ -578,14 +598,11 @@ async function handleEvent(
     }
 
     if (inbox) {
-      // [Craval kzn] line_message_id の部分一意インデックスで重複挿入を防ぐ。
-      await db
-        .prepare(
-          `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_message_id, created_at)
-           VALUES (?, ?, 'incoming', ?, ?, NULL, NULL, 'user', ?, ?)`,
-        )
-        .bind(crypto.randomUUID(), friend.id, msg.type, finalContent, msg.id, jstNow())
-        .run();
+      // [Craval kzn] webhookEventId / line_message_id で冪等。取消判定は挿入文の中で原子的に行う。
+      await insertIncomingLog(db, {
+        friendId: friend.id, messageType: msg.type, content: finalContent, source: 'user',
+        lineMessageId: msg.id, webhookEventId, createdAt: jstNow(),
+      });
       return;
     }
     await db
@@ -614,17 +631,18 @@ async function handleEvent(
     const incomingText = unsentAlready ? UNSENT_PLACEHOLDER : textMessage.text;
 
     // 受信メッセージをログに記録
+    // [Craval kzn] replay=true は「ログは記録済み（途中失敗からの再処理）」。完了判定は webhook_inbox.processed のみで、
+    // ここでは return しない。冪等な後続（未読化）は続行し、外部に出る副作用（応答・クロスアカウント送信・
+    // イベント発火）は二重実行を避けるため replay では行わない。
+    let replay = false;
     if (inbox) {
-      // [Craval kzn] 同一 LINE message の再処理では挿入せず、以降の副作用（応答・イベント発火）も行わない。
-      const inserted = await db
-        .prepare(
-          `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_message_id, created_at)
-           VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'user', ?, ?)`,
-        )
-        .bind(logId, friend.id, incomingText, textMessage.id, now)
-        .run();
-      if ((inserted.meta?.changes ?? 0) === 0) return;
-      if (unsentAlready) return;
+      const inserted = await insertIncomingLog(db, {
+        friendId: friend.id, messageType: 'text', content: incomingText, source: 'user',
+        lineMessageId: textMessage.id, webhookEventId, createdAt: now,
+      });
+      replay = !inserted;
+      // 取消済み（挿入前後どちらで確定したかによらず）なら副作用を一切行わない。
+      if (unsentAlready || (await isUnsent(db, textMessage.id))) return;
     } else {
       await db
         .prepare(
@@ -635,8 +653,10 @@ async function handleEvent(
         .run();
     }
 
+    const skipSideEffects = eventBusDisabled || replay;
+
     // Cross-account trigger: send message from another account via UUID
-    if (incomingText === '体験を完了する' && lineAccountId) {
+    if (!skipSideEffects && incomingText === '体験を完了する' && lineAccountId) {
       try {
         const friendRecord = await db.prepare('SELECT user_id FROM friends WHERE id = ?').bind(friend.id).first<{ user_id: string | null }>();
         if (friendRecord?.user_id) {
@@ -694,17 +714,20 @@ async function handleEvent(
       ? `SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC`
       : `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id IS NULL ORDER BY created_at ASC`;
     const autoReplyStmt = db.prepare(autoReplyQuery);
-    const autoReplies = await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt)
-      .all<{
-        id: string;
-        keyword: string;
-        match_type: 'exact' | 'contains';
-        response_type: string;
-        response_content: string;
-        template_id: string | null;
-        is_active: number;
-        created_at: string;
-      }>();
+    type AutoReplyRow = {
+      id: string;
+      keyword: string;
+      match_type: 'exact' | 'contains';
+      response_type: string;
+      response_content: string;
+      template_id: string | null;
+      is_active: number;
+      created_at: string;
+    };
+    // [Craval kzn] skipSideEffects（EVENT_BUS_DISABLED / 再処理）では自動応答を評価しない＝未読として扱う。
+    const autoReplies: { results: AutoReplyRow[] } = skipSideEffects
+      ? { results: [] }
+      : await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt).all<AutoReplyRow>();
 
     let matched = false;
     let replyTokenConsumed = false;
@@ -760,6 +783,8 @@ async function handleEvent(
     if (!matched) {
       await upsertChatOnMessage(db, friend.id);
     }
+
+    if (skipSideEffects) return;
 
     // イベントバス発火: message_received
     // Pass replyToken only when auto_reply didn't actually consume it

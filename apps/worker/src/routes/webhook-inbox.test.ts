@@ -30,7 +30,7 @@ import { fireEvent } from '../services/event-bus.js';
 import { handleWebhookEvent } from './webhook.js';
 import { LineClient } from '@line-crm/line-sdk';
 import { createKznTestDb, type SqliteD1 } from '../test-utils/sqlite-d1.js';
-import { runInboxMaintenance, hmacHex, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
+import { runInboxMaintenance, hmacHex, insertIncomingLog, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
 
 const SIG = 'A'.repeat(43) + '=';
 const USER = 'U0000000000000000000000000000test';
@@ -243,8 +243,9 @@ describe('follow / unfollow の時刻条件', () => {
     await post([follow(2000)]);
     await post([unfollow(3000)]);
     await post([follow(1000)]); // 遅延到着した古い follow
-    expect(rows('SELECT is_following, follow_state_at FROM friends WHERE line_user_id = ?', USER))
-      .toEqual([{ is_following: 0, follow_state_at: 3000 }]);
+    expect(rows('SELECT is_following FROM friends WHERE line_user_id = ?', USER)).toEqual([{ is_following: 0 }]);
+    expect(rows('SELECT is_following, state_at FROM friend_follow_state WHERE line_user_id = ?', USER))
+      .toEqual([{ is_following: 0, state_at: 3000 }]);
   }, 10_000);
 
   test('新しい follow の後に古い unfollow を処理しても、フォロー状態のまま', async () => {
@@ -331,5 +332,136 @@ describe('env 未設定（sbo/fzk と同じ）→ 従来挙動', () => {
       { line_message_id: null },
       { line_message_id: null },
     ]);
+  }, 10_000);
+});
+
+
+// ─── CODEX コードレビュー2 の指摘（落ちる→直る）─────────────────────────────
+
+const postback = (data: string, ts = 7000, id = evId()) => ({
+  type: 'postback', webhookEventId: id, timestamp: ts, replyToken: 'rt-pb',
+  source: { type: 'user', userId: USER }, mode: 'active', deliveryContext: { isRedelivery: false },
+  postback: { data },
+});
+
+function reprocessDeps(extra: Partial<Parameters<typeof runInboxMaintenance>[0]> = {}) {
+  const process = (event: never, accountId: string | null) =>
+    handleWebhookEvent(db.asD1(), new LineClient('token'), event, 'token', accountId, 'https://kzn.example', '', undefined, { inbox: true });
+  return { db: db.asD1(), process, mirror: null, now: () => Date.now() + RETRY_AFTER_MS + 1000, ...extra };
+}
+
+describe('[review2-1] 取消先着の本文は保存時点で伏せる（処理失敗でも残らない）', () => {
+  test('unsend → message（処理は失敗）でも webhook_inbox に本文が残らない', async () => {
+    await seedFriend();
+    await post([unsend('m-40')]);
+    db.failOn = /INTO messages_log/;
+    const ev = text('m-40', '絶対に残してはいけない');
+    await post([ev]);
+    db.failOn = null;
+    const [row] = rows<{ body_json: string; processed: number }>('SELECT body_json, processed FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId);
+    expect(row.processed).toBe(0);
+    expect(row.body_json).not.toContain('絶対に残してはいけない');
+  }, 10_000);
+
+  test('insertIncomingLog は挿入文の中で取消を判定（呼び出し側が生本文を渡しても伏字で保存）', async () => {
+    await seedFriend();
+    const friendId = rows<{ id: string }>('SELECT id FROM friends')[0].id;
+    db.raw.prepare('INSERT INTO unsent_messages (line_message_id, unsent_at) VALUES (?, ?)').run('m-41', 1);
+    const inserted = await insertIncomingLog(db.asD1(), {
+      friendId, messageType: 'text', content: '割り込みで残る本文', source: 'user',
+      lineMessageId: 'm-41', webhookEventId: 'ev-41', createdAt: 'now',
+    });
+    expect(inserted).toBe(true);
+    expect(rows("SELECT content FROM messages_log WHERE direction = 'incoming'")).toEqual([{ content: UNSENT_PLACEHOLDER }]);
+  }, 10_000);
+});
+
+describe('[review2-2] follow/unfollow は原子的・未登録 unfollow も記録', () => {
+  test('follow のプロフィール取得中に新しい unfollow が完了 → 最終状態はブロック', async () => {
+    let injected = false;
+    lineMocks.getProfile.mockImplementation(async () => {
+      if (!injected) {
+        injected = true;
+        await post([unfollow(3000)]);
+      }
+      return { displayName: 'テスト太郎', userId: USER };
+    });
+    await post([follow(1000)]);
+    expect(rows('SELECT is_following FROM friends WHERE line_user_id = ?', USER)).toEqual([{ is_following: 0 }]);
+  }, 10_000);
+
+  test('友だち未登録で unfollow(3000) → 古い follow(1000) が後着 → フォロー扱いにしない', async () => {
+    await post([unfollow(3000)]);
+    await post([follow(1000)]);
+    const r = rows<{ is_following: number }>('SELECT is_following FROM friends WHERE line_user_id = ?', USER);
+    expect(r.every((x) => x.is_following === 0)).toBe(true);
+  }, 10_000);
+});
+
+describe('[review2-3] EVENT_BUS_DISABLED=1 でイベントバスと自動応答を止める', () => {
+  test('message: fireEvent も auto_reply も動かない（未読化は行う）', async () => {
+    db.raw.prepare("INSERT INTO auto_replies (id, keyword, match_type, response_type, response_content) VALUES ('ar1', 'こんにちは', 'exact', 'text', '自動応答')").run();
+    const e = env({ EVENT_BUS_DISABLED: '1' });
+    await post([follow(1000)], e);
+    await post([text('m-50', 'こんにちは')], e);
+    await post([postback('こんにちは')], e);
+    expect(fireEvent).not.toHaveBeenCalled();
+    expect(lineMocks.replyMessage).not.toHaveBeenCalled();
+    expect(rows("SELECT * FROM messages_log WHERE direction = 'outgoing'")).toHaveLength(0);
+    expect(rows('SELECT * FROM chats')).toHaveLength(1);
+  }, 10_000);
+
+  test('未設定なら従来どおり fireEvent が呼ばれる', async () => {
+    await seedFriend();
+    await post([text('m-51', 'hi')]);
+    expect(vi.mocked(fireEvent).mock.calls.some((c) => c[1] === 'message_received')).toBe(true);
+  }, 10_000);
+});
+
+describe('[review2-4] MIRROR_URL あり・MIRROR_SECRET なし', () => {
+  test('mirrored=0・attempts 増やさず保持 → 鍵設定後の Cron で転送', async () => {
+    const fetchStub = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchStub);
+    try {
+      const e = env({ MIRROR_URL: 'https://mirror.example/x' });
+      await post([follow(1000)], e);
+      const ev = text('m-60', 'x');
+      await post([ev], e);
+      expect(fetchStub).not.toHaveBeenCalled();
+      expect(rows('SELECT mirrored, mirror_attempts FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId))
+        .toEqual([{ mirrored: 0, mirror_attempts: 0 }]);
+      const r = await runInboxMaintenance(reprocessDeps({ mirror: { url: 'https://mirror.example/x', secret: 's' } }));
+      expect(r.remirrored).toBeGreaterThanOrEqual(1);
+      expect(rows('SELECT mirrored FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId)).toEqual([{ mirrored: 1 }]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+});
+
+describe('[review2-5] postback 再処理で受信ログが重複しない', () => {
+  test('ログ挿入後に完了フラグ更新が失敗 → Cron 再処理でもログ1件', async () => {
+    await seedFriend();
+    const ev = postback('menu=1');
+    db.failOn = /SET processed = 1/;
+    await post([ev]);
+    db.failOn = null;
+    await runInboxMaintenance(reprocessDeps());
+    expect(rows("SELECT * FROM messages_log WHERE direction = 'incoming' AND source = 'postback'")).toHaveLength(1);
+    expect(rows('SELECT processed FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId)).toEqual([{ processed: 1 }]);
+  }, 10_000);
+});
+
+describe('[review2-6] テキストの途中失敗は再処理で後続まで完了する', () => {
+  test('ログ挿入後に未読化(chats)で失敗 → 再処理で chats が作られる', async () => {
+    await seedFriend();
+    const ev = text('m-70', '未読にして');
+    db.failOn = /INSERT INTO chats/;
+    await post([ev]);
+    db.failOn = null;
+    expect(rows('SELECT * FROM chats')).toHaveLength(0);
+    await runInboxMaintenance(reprocessDeps());
+    expect(rows('SELECT * FROM chats')).toHaveLength(1);
+    expect(rows("SELECT * FROM messages_log WHERE direction = 'incoming'")).toHaveLength(1);
   }, 10_000);
 });

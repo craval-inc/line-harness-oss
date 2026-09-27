@@ -5,8 +5,9 @@
 -- webhook_inbox: 署名検証後に LINE の生イベントを同期保存し、処理(processed)と外部ミラー転送(mirrored)を
 --                別フラグで管理する。途中失敗は Cron が再処理する。
 -- unsent_messages: 送信取消済みの LINE message id。取消が元メッセージより先に届いても本文を保存しない。
--- messages_log.line_message_id: 受信メッセージの LINE message id（WEBHOOK_INBOX 時のみ入る）。重複挿入防止。
--- friends.follow_state_at: follow/unfollow を最後に反映したイベント時刻(ms)。古いイベントで状態を巻き戻さない。
+-- friend_follow_state: follow/unfollow の最新状態とそのイベント時刻(ms)。友だち未登録の unfollow も保持し、
+--                      古いイベントで状態を巻き戻さない。friends.is_following はここから同期する。
+-- messages_log.line_message_id / webhook_event_id: 受信ログの重複挿入防止（WEBHOOK_INBOX 時のみ入る）。
 
 CREATE TABLE IF NOT EXISTS webhook_inbox (
   webhook_event_id TEXT PRIMARY KEY,
@@ -33,8 +34,16 @@ CREATE TABLE IF NOT EXISTS unsent_messages (
   unsent_at       INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS friend_follow_state (
+  line_user_id TEXT PRIMARY KEY,
+  is_following INTEGER NOT NULL,
+  state_at     INTEGER NOT NULL
+);
+
 ALTER TABLE messages_log ADD COLUMN line_message_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_log_line_message_id
   ON messages_log (line_message_id) WHERE line_message_id IS NOT NULL;
 
-ALTER TABLE friends ADD COLUMN follow_state_at INTEGER;
+ALTER TABLE messages_log ADD COLUMN webhook_event_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_log_webhook_event_id
+  ON messages_log (webhook_event_id) WHERE webhook_event_id IS NOT NULL;
