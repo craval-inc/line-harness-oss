@@ -31,7 +31,7 @@ import { handleWebhookEvent } from './webhook.js';
 import { LineClient } from '@line-crm/line-sdk';
 import type { WebhookEvent } from '@line-crm/line-sdk';
 import { createKznTestDb, type SqliteD1 } from '../test-utils/sqlite-d1.js';
-import { runInboxMaintenance, hmacHex, insertIncomingLog, saveInboxEvents, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
+import { runInboxMaintenance, hmacHex, insertIncomingLog, saveInboxEvents, claimFollowTransition, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
 
 const SIG = 'A'.repeat(43) + '=';
 const USER = 'U0000000000000000000000000000test';
@@ -732,4 +732,53 @@ describe('[v024-5] 受信箱経由でも本家 065 のフォロー履歴を同�
     await post([text('m-211', 'ブロック後')]);
     expect(hist()).toMatchObject({ is_following: 0, current_follow_started_at: null, last_unfollowed_at: J(t), unfollow_count: 1 });
   }, 10_000);
+});
+
+
+describe('[v024-5b] 行作成前の unfollow 保留（K002）の原子性・冪等性・既存データ引継ぎ', () => {
+  const J = (ms: number) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
+  const pending = () => rows('SELECT is_following, state_at, pending_unfollow_count, pending_last_unfollowed_at FROM friend_follow_state WHERE line_user_id = ?', USER)[0];
+  const hist = () => rows<Record<string, unknown>>('SELECT is_following, current_follow_started_at, last_unfollowed_at, unfollow_count FROM friends WHERE line_user_id = ?', USER)[0];
+
+  test('unfollow の状態記録と保留記録は1文（claim だけで保留まで入る＝間に行作成が割り込む隙が無い）', async () => {
+    const t = Date.UTC(2026, 8, 2);
+    expect(await claimFollowTransition(db.asD1(), USER, false, t)).toBe(true);
+    expect(pending()).toEqual({ is_following: 0, state_at: t, pending_unfollow_count: 1, pending_last_unfollowed_at: t });
+  });
+
+  test('同じ unfollow イベントの再処理（同時刻）で保留は二重に加算されない → 登録後の解除回数は 1', async () => {
+    const t = Date.UTC(2026, 8, 2);
+    const ev = unfollow(t);
+    const handle = () => handleWebhookEvent(db.asD1(), new LineClient('token'), ev as unknown as WebhookEvent, 'token', null, 'https://kzn.example', '', undefined, { inbox: true });
+    await handle();
+    await handle(); // 途中失敗からの再処理相当
+    expect(pending()).toMatchObject({ pending_unfollow_count: 1 });
+    await post([text('m-300', '登録')]);
+    expect(hist()).toMatchObject({ is_following: 0, last_unfollowed_at: J(t), unfollow_count: 1 });
+  }, 10_000);
+
+  test('友だち行がある時の unfollow は保留に入れず friends 側で1回だけ数える', async () => {
+    const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 2);
+    await post([follow(t1)]);
+    await post([unfollow(t2)]);
+    expect(pending()).toMatchObject({ pending_unfollow_count: 0 });
+    expect(hist()).toMatchObject({ is_following: 0, unfollow_count: 1, last_unfollowed_at: J(t2) });
+  }, 10_000);
+
+  test('K002 適用前からある「未登録・unfollow 状態」は K002 で保留へ引き継がれる', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { SqliteD1 } = await import('../test-utils/sqlite-d1.js');
+    const old = new SqliteD1();
+    old.raw.exec(readFileSync('../../packages/db/bootstrap.sql', 'utf8'));
+    old.raw.exec(readFileSync('../../packages/db/migrations-kzn/K001_webhook_inbox.sql', 'utf8'));
+    const t = Date.UTC(2026, 8, 20);
+    old.raw.prepare('INSERT INTO friend_follow_state (line_user_id, is_following, state_at) VALUES (?, 0, ?)').run(USER, t);
+    old.raw.prepare("INSERT INTO friend_follow_state (line_user_id, is_following, state_at) VALUES ('Uregistered', 0, ?)").run(t);
+    old.raw.prepare("INSERT INTO friends (id, line_user_id, is_following, unfollow_count) VALUES ('fr', 'Uregistered', 0, 1)").run();
+    old.raw.exec(readFileSync('../../packages/db/migrations-kzn/K002_follow_state_pending.sql', 'utf8'));
+    expect(old.raw.prepare('SELECT pending_unfollow_count AS n, pending_last_unfollowed_at AS at FROM friend_follow_state WHERE line_user_id = ?').get(USER))
+      .toEqual({ n: 1, at: t });
+    // 友だち行がある人は friends 側に記録済みなので保留にしない
+    expect(old.raw.prepare("SELECT pending_unfollow_count AS n FROM friend_follow_state WHERE line_user_id = 'Uregistered'").get()).toEqual({ n: 0 });
+  });
 });

@@ -203,13 +203,37 @@ export async function claimFollowTransition(
   following: boolean,
   eventTimestamp: number,
 ): Promise<boolean> {
+  if (following) {
+    const res = await db
+      .prepare(
+        `INSERT INTO friend_follow_state (line_user_id, is_following, state_at) VALUES (?, 1, ?)
+         ON CONFLICT(line_user_id) DO UPDATE SET is_following = 1, state_at = excluded.state_at
+          WHERE excluded.state_at >= friend_follow_state.state_at`,
+      )
+      .bind(lineUserId, eventTimestamp)
+      .run();
+    return (res.meta?.changes ?? 0) >= 1;
+  }
+  // unfollow: 状態の記録と「友だち行が無い間の解除履歴（K002 保留分）」を1文で行う（間に行作成が割り込む隙を作らない）。
+  // 保留の加算は状態時刻が真に新しくなった時だけ＝同じイベントの再処理（同時刻）では二重に数えない。
+  // 友だち行がある時は保留に入れない（friends 側の履歴は syncFriendFollowFromState が状態遷移で数える）。
+  const noFriend = 'NOT EXISTS (SELECT 1 FROM friends f WHERE f.line_user_id = ?)';
   const res = await db
     .prepare(
-      `INSERT INTO friend_follow_state (line_user_id, is_following, state_at) VALUES (?, ?, ?)
-       ON CONFLICT(line_user_id) DO UPDATE SET is_following = excluded.is_following, state_at = excluded.state_at
+      `INSERT INTO friend_follow_state (line_user_id, is_following, state_at, pending_unfollow_count, pending_last_unfollowed_at)
+       VALUES (?, 0, ?, CASE WHEN ${noFriend} THEN 1 ELSE 0 END, CASE WHEN ${noFriend} THEN ? ELSE NULL END)
+       ON CONFLICT(line_user_id) DO UPDATE SET
+         is_following = 0,
+         state_at = excluded.state_at,
+         pending_unfollow_count = friend_follow_state.pending_unfollow_count
+           + CASE WHEN excluded.state_at > friend_follow_state.state_at AND ${noFriend} THEN 1 ELSE 0 END,
+         pending_last_unfollowed_at = CASE
+           WHEN excluded.state_at > friend_follow_state.state_at AND ${noFriend}
+             THEN MAX(COALESCE(friend_follow_state.pending_last_unfollowed_at, 0), excluded.state_at)
+           ELSE friend_follow_state.pending_last_unfollowed_at END
         WHERE excluded.state_at >= friend_follow_state.state_at`,
     )
-    .bind(lineUserId, following ? 1 : 0, eventTimestamp)
+    .bind(lineUserId, eventTimestamp, lineUserId, lineUserId, eventTimestamp, lineUserId, lineUserId)
     .run();
   return (res.meta?.changes ?? 0) >= 1;
 }
@@ -250,24 +274,6 @@ function followSyncStatement(db: D1Database, lineUserId: string, nowJst: string)
 
 /** ms → jstNow() と同じ形式の SQL 式（引数は SQL 式文字列）。 */
 const jstOfMsSql = (ms: string) => `(strftime('%Y-%m-%dT%H:%M:%f', (${ms}) / 1000.0, 'unixepoch', '+9 hours') || '+09:00')`;
-
-/**
- * 友だち行が無い時に受けた unfollow を friend_follow_state の保留分に記録する（K002）。
- * 行があれば何もしない（その場合は syncFriendFollowFromState が friends の履歴を更新する）。
- * claimFollowTransition(false) が反映された時だけ呼ぶ（重複・古い unfollow を数えない）。
- */
-export async function recordPendingUnfollowIfNoFriend(db: D1Database, lineUserId: string, eventTimestamp: number): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE friend_follow_state
-          SET pending_unfollow_count = pending_unfollow_count + 1,
-              pending_last_unfollowed_at = MAX(COALESCE(pending_last_unfollowed_at, 0), ?)
-        WHERE line_user_id = ?
-          AND NOT EXISTS (SELECT 1 FROM friends f WHERE f.line_user_id = ?)`,
-    )
-    .bind(eventTimestamp, lineUserId, lineUserId)
-    .run();
-}
 
 /**
  * 新規の友だち行を「最新状態（friend_follow_state）＋行が無い間の unfollow 保留分（K002）」から作る列の値（SQL 式）。

@@ -34,7 +34,6 @@ import {
   claimFollowTransition,
   syncFriendFollowFromState,
   upsertFriendAndSyncFollow,
-  recordPendingUnfollowIfNoFriend,
   touchChatOnIncomingEvent,
   insertIncomingLog,
   registerFriendFromMessage,
@@ -539,10 +538,8 @@ async function handleEvent(
 
     // [Craval kzn] 受信箱経由はイベント時刻で条件付き更新（友だち未登録でも状態を記録）。
     if (inbox && typeof eventTimestamp === 'number') {
-      if (await claimFollowTransition(db, userId, false, eventTimestamp)) {
-        // 友だち行がまだ無ければ解除履歴を保留（K002）。行ができる時に畳み込まれる。
-        await recordPendingUnfollowIfNoFriend(db, userId, eventTimestamp);
-      }
+      // 状態の記録と、友だち行がまだ無い時の解除履歴の保留（K002）は claim の1文で行う。
+      await claimFollowTransition(db, userId, false, eventTimestamp);
       await syncFriendFollowFromState(db, userId, jstNow());
       return;
     }
