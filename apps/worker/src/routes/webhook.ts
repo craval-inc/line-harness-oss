@@ -33,6 +33,8 @@ import {
   isUnsent,
   claimFollowTransition,
   syncFriendFollowFromState,
+  upsertFriendAndSyncFollow,
+  touchChatOnIncomingEvent,
   insertIncomingLog,
   UNSENT_PLACEHOLDER,
 } from '../services/webhook-inbox.js';
@@ -286,15 +288,27 @@ async function handleEvent(
     // [Craval security M-5] displayNameはPIIなのでログ出力しない（取得成否のみ）
     console.log(`[follow] profile_fetched=${profile ? 'ok' : 'fail'}`);
 
-    const friend = await upsertFriend(db, {
-      lineUserId: userId,
-      displayName: profile?.displayName ?? null,
-      pictureUrl: profile?.pictureUrl ?? null,
-      statusMessage: profile?.statusMessage ?? null,
-    });
-    // [Craval kzn] upsertFriend は無条件で is_following=1 にするため、プロフィール取得中などに
-    // 新しい unfollow が割り込んでいても最新状態へ戻す。
-    if (followGuard) await syncFriendFollowFromState(db, userId, jstNow());
+    let friend: Awaited<ReturnType<typeof upsertFriend>>;
+    if (followGuard) {
+      // [Craval kzn] 友だち登録/更新と is_following の最新状態への同期を1 batch で行う。プロフィール取得中などに
+      // 新しい unfollow が割り込んでいても最新状態に収束し、途中失敗なら両方ロールバックされる。
+      await upsertFriendAndSyncFollow(db, {
+        lineUserId: userId,
+        displayName: profile?.displayName ?? null,
+        pictureUrl: profile?.pictureUrl ?? null,
+        statusMessage: profile?.statusMessage ?? null,
+      }, jstNow());
+      const upserted = await getFriendByLineUserId(db, userId);
+      if (!upserted) throw new Error('friend upsert did not return a row');
+      friend = upserted as Awaited<ReturnType<typeof upsertFriend>>;
+    } else {
+      friend = await upsertFriend(db, {
+        lineUserId: userId,
+        displayName: profile?.displayName ?? null,
+        pictureUrl: profile?.pictureUrl ?? null,
+        statusMessage: profile?.statusMessage ?? null,
+      });
+    }
 
     console.log(`[follow] friend.id=${friend.id} friend.line_account_id=${(friend as any).line_account_id}`);
 
@@ -781,7 +795,12 @@ async function handleEvent(
 
     // auto_replies にマッチしなかった = 自発メッセージ → unread にする
     if (!matched) {
-      await upsertChatOnMessage(db, friend.id);
+      if (inbox && typeof eventTimestamp === 'number') {
+        // [Craval kzn] イベント時刻で条件付き（再処理で対応済みチャットを未読に戻さない）
+        await touchChatOnIncomingEvent(db, friend.id, eventTimestamp, jstNow());
+      } else {
+        await upsertChatOnMessage(db, friend.id);
+      }
     }
 
     if (skipSideEffects) return;

@@ -1,4 +1,6 @@
 -- 046_kzn_webhook_inbox.sql
+-- ※ 本ファイルはどの DB（sbo/fzk/kzn）にも未適用の段階で、レビュー指摘により書き換え済み（2026-09-27）。
+--    以後は一度でも適用したら書き換えず、変更は追記 migration（047 以降）のみで行う。
 -- [Craval kzn] LINE Webhook 受信箱（WEBHOOK_INBOX=1 の環境だけが使う。未設定の環境では参照されない）。
 -- 追加のみ（additive-only）。既存テーブル・既存行の意味は変えない。
 --
@@ -8,6 +10,7 @@
 -- friend_follow_state: follow/unfollow の最新状態とそのイベント時刻(ms)。友だち未登録の unfollow も保持し、
 --                      古いイベントで状態を巻き戻さない。friends.is_following はここから同期する。
 -- messages_log.line_message_id / webhook_event_id: 受信ログの重複挿入防止（WEBHOOK_INBOX 時のみ入る）。
+-- chats.last_incoming_event_at: 未読化・最終受信時刻を反映した受信イベント時刻(ms)。再処理で対応済みを未読に戻さない。
 
 CREATE TABLE IF NOT EXISTS webhook_inbox (
   webhook_event_id TEXT PRIMARY KEY,
@@ -47,3 +50,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_log_line_message_id
 ALTER TABLE messages_log ADD COLUMN webhook_event_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_log_webhook_event_id
   ON messages_log (webhook_event_id) WHERE webhook_event_id IS NOT NULL;
+
+ALTER TABLE chats ADD COLUMN last_incoming_event_at INTEGER;

@@ -30,7 +30,7 @@ import { fireEvent } from '../services/event-bus.js';
 import { handleWebhookEvent } from './webhook.js';
 import { LineClient } from '@line-crm/line-sdk';
 import { createKznTestDb, type SqliteD1 } from '../test-utils/sqlite-d1.js';
-import { runInboxMaintenance, hmacHex, insertIncomingLog, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
+import { runInboxMaintenance, hmacHex, insertIncomingLog, saveInboxEvents, UNSENT_PLACEHOLDER, RETRY_AFTER_MS } from '../services/webhook-inbox.js';
 
 const SIG = 'A'.repeat(43) + '=';
 const USER = 'U0000000000000000000000000000test';
@@ -463,5 +463,87 @@ describe('[review2-6] テキストの途中失敗は再処理で後続まで完�
     await runInboxMaintenance(reprocessDeps());
     expect(rows('SELECT * FROM chats')).toHaveLength(1);
     expect(rows("SELECT * FROM messages_log WHERE direction = 'incoming'")).toHaveLength(1);
+  }, 10_000);
+});
+
+
+// ─── CODEX 再レビュー（review-code3）の残件（落ちる→直る）──────────────────────
+
+describe('[review3-A] unsend の登録は受信箱の同期保存 batch で完結する（非同期処理に頼らない）', () => {
+  const save = (events: unknown[]) =>
+    saveInboxEvents(db.asD1(), events as never, { lineAccountId: null, mirror: false, now: 1 });
+
+  test('同一リクエストで [message, unsend] → 保存直後（処理前）に生本文が無い', async () => {
+    const ev = text('m-80', '同時に取り消す本文');
+    await save([ev, unsend('m-80')]);
+    const [row] = rows<{ body_json: string }>('SELECT body_json FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId);
+    expect(row.body_json).not.toContain('同時に取り消す本文');
+    expect(rows('SELECT line_message_id FROM unsent_messages')).toEqual([{ line_message_id: 'm-80' }]);
+  });
+
+  test('同一リクエストで [unsend, message] → 保存直後に生本文が無い', async () => {
+    const ev = text('m-81', '逆順でも残さない');
+    await save([unsend('m-81'), ev]);
+    const [row] = rows<{ body_json: string }>('SELECT body_json FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId);
+    expect(row.body_json).not.toContain('逆順でも残さない');
+  });
+
+  test('別リクエスト（message 保存済み・処理前）→ unsend の保存だけで生本文と受信ログが伏字になる', async () => {
+    await seedFriend();
+    const ev = text('m-82', '後から取り消す本文');
+    await post([ev]); // 処理まで完了して messages_log に本文あり
+    await save([unsend('m-82')]); // unsend は保存のみ（処理しない）
+    const [row] = rows<{ body_json: string }>('SELECT body_json FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId);
+    expect(row.body_json).not.toContain('後から取り消す本文');
+    expect(rows("SELECT content FROM messages_log WHERE direction = 'incoming'")).toEqual([{ content: UNSENT_PLACEHOLDER }]);
+  }, 10_000);
+
+  test('並行リクエスト（message と unsend を同時に保存）でも生本文が残らない', async () => {
+    const ev = text('m-83', '並行で取り消す本文');
+    await Promise.all([save([ev]), save([unsend('m-83')])]);
+    const [row] = rows<{ body_json: string }>('SELECT body_json FROM webhook_inbox WHERE webhook_event_id = ?', ev.webhookEventId);
+    expect(row.body_json).not.toContain('並行で取り消す本文');
+  });
+});
+
+describe('[review3-B] follow の友だち更新と状態同期は1 batch（途中失敗で friends=1/最新=0 を残さない）', () => {
+  test('プロフィール取得中に新しい unfollow → follow の同期だけ失敗しても friends は最新(0)のまま', async () => {
+    await post([follow(500)]);
+    let injected = false;
+    lineMocks.getProfile.mockImplementation(async () => {
+      if (!injected) {
+        injected = true;
+        await post([unfollow(3000)]);
+        // この後の follow の同期文だけを失敗させる
+        db.failOn = /is_following = \(SELECT s\.is_following FROM friend_follow_state/;
+      }
+      return { displayName: 'テスト太郎', userId: USER };
+    });
+    await post([follow(1000)]);
+    db.failOn = null;
+    expect(rows('SELECT is_following FROM friends WHERE line_user_id = ?', USER)).toEqual([{ is_following: 0 }]);
+  }, 10_000);
+});
+
+describe('[review3-C] 再処理で対応済みチャットを未読に戻さない', () => {
+  test('処理済み更新だけ失敗 → 担当者が対応済みに → Cron 再処理しても resolved のまま・最終受信時刻はイベント時刻', async () => {
+    await seedFriend();
+    const ev = text('m-90', '対応済みにする', Date.UTC(2026, 8, 27, 0, 0, 0));
+    db.failOn = /SET processed = 1/;
+    await post([ev]);
+    db.failOn = null;
+    db.raw.prepare("UPDATE chats SET status = 'resolved'").run();
+    await runInboxMaintenance(reprocessDeps());
+    const [chat] = rows<{ status: string; last_message_at: string }>('SELECT status, last_message_at FROM chats');
+    expect(chat.status).toBe('resolved');
+    expect(chat.last_message_at).toBe('2026-09-27T09:00:00.000+09:00');
+  }, 10_000);
+
+  test('新しいイベントなら従来どおり resolved → unread に戻す', async () => {
+    await seedFriend();
+    await post([text('m-91', '1通目', 10_000)]);
+    db.raw.prepare("UPDATE chats SET status = 'resolved'").run();
+    await post([text('m-92', '2通目', 20_000)]);
+    expect(rows('SELECT status FROM chats')).toEqual([{ status: 'unread' }]);
   }, 10_000);
 });

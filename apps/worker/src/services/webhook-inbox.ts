@@ -119,6 +119,13 @@ export async function saveInboxEvents(
         opts.now,
       );
   });
+  // unsend は保存と同じトランザクションで取消を登録し、既存の本文（受信箱・受信ログ）を伏せる。
+  // 並行リクエストでも D1 の batch は直列化されるので、元メッセージの保存と取消のどちらが先でも本文は残らない。
+  for (const e of tracked) {
+    if ((e as { type: string }).type !== 'unsend') continue;
+    const messageId = lineMessageIdOf(e);
+    if (messageId) stmts.push(...unsendStatements(db, messageId, opts.now));
+  }
   // 取消が先着していたメッセージは、保存と同じトランザクション内で本文を伏せる（処理の成否に依存しない）。
   const ids = tracked.map((e) => webhookEventIdOf(e));
   stmts.push(
@@ -158,7 +165,12 @@ export async function markFailed(db: D1Database, webhookEventId: string, err: un
 
 /** 送信取消: 取消済み ID を記録し、保存済み本文を置換する。 */
 export async function applyUnsend(db: D1Database, lineMessageId: string, now: number): Promise<void> {
-  await db.batch([
+  await db.batch(unsendStatements(db, lineMessageId, now));
+}
+
+/** 取消登録と本文置換の文（冪等）。受信箱の保存 batch にも同じ文を入れる。 */
+function unsendStatements(db: D1Database, lineMessageId: string, now: number): D1PreparedStatement[] {
+  return [
     db.prepare('INSERT OR IGNORE INTO unsent_messages (line_message_id, unsent_at) VALUES (?, ?)').bind(lineMessageId, now),
     db.prepare('UPDATE messages_log SET content = ? WHERE line_message_id = ?').bind(UNSENT_PLACEHOLDER, lineMessageId),
     db
@@ -169,7 +181,7 @@ export async function applyUnsend(db: D1Database, lineMessageId: string, now: nu
           WHERE line_message_id = ? AND event_type = 'message'`,
       )
       .bind(UNSENT_PLACEHOLDER, now, lineMessageId),
-  ]);
+  ];
 }
 
 export async function isUnsent(db: D1Database, lineMessageId: string): Promise<boolean> {
@@ -208,7 +220,11 @@ export async function claimFollowTransition(
  * 最後にこれを呼べば最新状態に収束する。
  */
 export async function syncFriendFollowFromState(db: D1Database, lineUserId: string, nowJst: string): Promise<void> {
-  await db
+  await followSyncStatement(db, lineUserId, nowJst).run();
+}
+
+function followSyncStatement(db: D1Database, lineUserId: string, nowJst: string): D1PreparedStatement {
+  return db
     .prepare(
       `UPDATE friends
           SET is_following = (SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id),
@@ -217,7 +233,70 @@ export async function syncFriendFollowFromState(db: D1Database, lineUserId: stri
           AND EXISTS (SELECT 1 FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id)
           AND is_following IS NOT (SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = friends.line_user_id)`,
     )
-    .bind(nowJst, lineUserId)
+    .bind(nowJst, lineUserId);
+}
+
+/**
+ * follow 時の友だち登録/更新（upsertFriend 相当）と is_following の最新状態への同期を1つの batch で行う。
+ * どちらかが失敗すれば両方ロールバック＝「friends=1 だが最新状態は unfollow」が残らない。
+ * プロフィール取得は呼び出し側で batch の前に済ませる。
+ */
+export async function upsertFriendAndSyncFollow(
+  db: D1Database,
+  input: { lineUserId: string; displayName: string | null; pictureUrl: string | null; statusMessage: string | null },
+  nowJst: string,
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO friends (id, line_user_id, display_name, picture_url, status_message, is_following, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(line_user_id) DO UPDATE SET
+           display_name = excluded.display_name,
+           picture_url = excluded.picture_url,
+           status_message = excluded.status_message,
+           is_following = 1,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(crypto.randomUUID(), input.lineUserId, input.displayName, input.pictureUrl, input.statusMessage, nowJst, nowJst),
+    followSyncStatement(db, input.lineUserId, nowJst),
+  ]);
+}
+
+/** epoch ms → jstNow() と同じ形式（YYYY-MM-DDTHH:mm:ss.sss+09:00）。 */
+export function toJstFromEpoch(ms: number): string {
+  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');
+}
+
+/**
+ * 受信イベントでチャットを未読化・最終受信時刻を更新する（WEBHOOK_INBOX 時の upsertChatOnMessage 置き換え）。
+ * イベント時刻で条件付き: 既にこのイベント時刻以上を反映済みなら何もしない＝再処理で対応済みチャットを未読に戻さない。
+ * last_message_at は処理時刻ではなくイベント時刻。
+ */
+export async function touchChatOnIncomingEvent(db: D1Database, friendId: string, eventTimestamp: number, nowJst: string): Promise<void> {
+  const eventAt = toJstFromEpoch(eventTimestamp);
+  const existing = await db
+    .prepare('SELECT id FROM chats WHERE friend_id = ? ORDER BY created_at DESC LIMIT 1')
+    .bind(friendId)
+    .first<{ id: string }>();
+  if (existing) {
+    await db
+      .prepare(
+        `UPDATE chats
+            SET status = CASE WHEN status = 'resolved' THEN 'unread' ELSE status END,
+                last_message_at = ?, last_incoming_event_at = ?, updated_at = ?
+          WHERE id = ? AND (last_incoming_event_at IS NULL OR last_incoming_event_at < ?)`,
+      )
+      .bind(eventAt, eventTimestamp, nowJst, existing.id, eventTimestamp)
+      .run();
+    return;
+  }
+  await db
+    .prepare(
+      `INSERT INTO chats (id, friend_id, operator_id, last_message_at, last_incoming_event_at, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?)`,
+    )
+    .bind(crypto.randomUUID(), friendId, eventAt, eventTimestamp, nowJst, nowJst)
     .run();
 }
 
