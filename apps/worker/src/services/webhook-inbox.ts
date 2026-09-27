@@ -248,13 +248,63 @@ function followSyncStatement(db: D1Database, lineUserId: string, nowJst: string)
     .bind(nowJst, lineUserId);
 }
 
+/** ms → jstNow() と同じ形式の SQL 式（引数は SQL 式文字列）。 */
+const jstOfMsSql = (ms: string) => `(strftime('%Y-%m-%dT%H:%M:%f', (${ms}) / 1000.0, 'unixepoch', '+9 hours') || '+09:00')`;
+
+/**
+ * 友だち行が無い時に受けた unfollow を friend_follow_state の保留分に記録する（K002）。
+ * 行があれば何もしない（その場合は syncFriendFollowFromState が friends の履歴を更新する）。
+ * claimFollowTransition(false) が反映された時だけ呼ぶ（重複・古い unfollow を数えない）。
+ */
+export async function recordPendingUnfollowIfNoFriend(db: D1Database, lineUserId: string, eventTimestamp: number): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE friend_follow_state
+          SET pending_unfollow_count = pending_unfollow_count + 1,
+              pending_last_unfollowed_at = MAX(COALESCE(pending_last_unfollowed_at, 0), ?)
+        WHERE line_user_id = ?
+          AND NOT EXISTS (SELECT 1 FROM friends f WHERE f.line_user_id = ?)`,
+    )
+    .bind(eventTimestamp, lineUserId, lineUserId)
+    .run();
+}
+
+/**
+ * 新規の友だち行を「最新状態（friend_follow_state）＋行が無い間の unfollow 保留分（K002）」から作る列の値（SQL 式）。
+ * - is_following: 最新状態（無ければ 1＝メッセージを送れている／このフォロー）
+ * - current_follow_started_at / last_followed_at: フォロー中なら最新状態の時刻（無ければ fallbackFollowAt）
+ * - unfollow_count / last_unfollowed_at: 保留分をそのまま
+ * 呼び出し側は同じ batch で clearPendingStatement を実行する。
+ */
+function newFriendHistorySql(fallbackFollowAtParam: string) {
+  const st = (col: string) => `(SELECT s.${col} FROM friend_follow_state s WHERE s.line_user_id = ?)`;
+  const following = `COALESCE(${st('is_following')}, 1)`;
+  const stateAt = jstOfMsSql(st('state_at'));
+  return {
+    // バインド順: 下の各式の ? は全て lineUserId、fallbackFollowAtParam は ? 1つ
+    isFollowing: following,
+    currentFollowStartedAt: `CASE WHEN ${following} = 1 THEN COALESCE(${stateAt}, ${fallbackFollowAtParam}) ELSE NULL END`,
+    lastFollowedAt: `COALESCE(CASE WHEN ${following} = 1 THEN ${stateAt} END, ${fallbackFollowAtParam})`,
+    lastUnfollowedAt: `CASE WHEN ${st('pending_last_unfollowed_at')} IS NULL THEN NULL ELSE ${jstOfMsSql(st('pending_last_unfollowed_at'))} END`,
+    unfollowCount: `COALESCE(${st('pending_unfollow_count')}, 0)`,
+  };
+}
+
+function clearPendingStatement(db: D1Database, lineUserId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE friend_follow_state SET pending_unfollow_count = 0, pending_last_unfollowed_at = NULL
+        WHERE line_user_id = ? AND EXISTS (SELECT 1 FROM friends f WHERE f.line_user_id = ?)`,
+    )
+    .bind(lineUserId, lineUserId);
+}
+
 /**
  * follow 時の友だち登録/更新（upsertFriend 相当）と is_following・フォロー履歴の最新状態への同期を1つの batch で行う。
- * どちらかが失敗すれば両方ロールバック＝「friends=1 だが最新状態は unfollow」が残らない。
+ * どちらかが失敗すれば全てロールバック＝「friends=1 だが最新状態は unfollow」が残らない。
  * - 既存行: プロフィールだけ更新し is_following には触れない（状態遷移と履歴は同期文だけが決める）
- * - 新規行: 「このフォローを反映済み」（is_following=1・初回/開始/最終フォロー日時＝このイベント時刻）で作り、
- *   その後の同期文で最新状態へ遷移させる。プロフィール取得中に新しい unfollow が完了していれば、
- *   同期文が 1→0 として解除日時・解除回数を記録する（0 で作ると同期条件に当たらず解除履歴が残らない）
+ * - 新規行: 最新状態と、行が無い間に受けた unfollow の保留分（K002）から作る。プロフィール取得中に
+ *   unfollow → 再 follow が完了していても、解除回数・解除日時・再フォロー開始日時が正しく残る
  * プロフィール取得は呼び出し側で batch の前に済ませる。
  */
 export async function upsertFriendAndSyncFollow(
@@ -263,13 +313,17 @@ export async function upsertFriendAndSyncFollow(
   nowJst: string,
   followEventTimestamp: number,
 ): Promise<void> {
+  const h = newFriendHistorySql('?');
+  const u = input.lineUserId;
+  const followAt = toJstFromEpoch(followEventTimestamp);
   await db.batch([
     db
       .prepare(
         `INSERT INTO friends
            (id, line_user_id, display_name, picture_url, status_message, is_following,
-            first_followed_at, current_follow_started_at, last_followed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+            first_followed_at, current_follow_started_at, last_followed_at, last_unfollowed_at, unfollow_count,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ${h.isFollowing}, ?, ${h.currentFollowStartedAt}, ${h.lastFollowedAt}, ${h.lastUnfollowedAt}, ${h.unfollowCount}, ?, ?)
          ON CONFLICT(line_user_id) DO UPDATE SET
            display_name = excluded.display_name,
            picture_url = excluded.picture_url,
@@ -277,20 +331,25 @@ export async function upsertFriendAndSyncFollow(
            updated_at = excluded.updated_at`,
       )
       .bind(
-        crypto.randomUUID(), input.lineUserId, input.displayName, input.pictureUrl, input.statusMessage,
-        toJstFromEpoch(followEventTimestamp), toJstFromEpoch(followEventTimestamp), toJstFromEpoch(followEventTimestamp),
+        crypto.randomUUID(), u, input.displayName, input.pictureUrl, input.statusMessage,
+        u, // is_following
+        followAt, // first_followed_at
+        u, u, followAt, // current_follow_started_at: following(u) + stateAt(u) + fallback
+        u, u, followAt, // last_followed_at: following(u) + stateAt(u) + fallback
+        u, u, // last_unfollowed_at
+        u, // unfollow_count
         nowJst, nowJst,
       ),
-    followSyncStatement(db, input.lineUserId, nowJst),
+    followSyncStatement(db, u, nowJst),
+    clearPendingStatement(db, u),
   ]);
 }
 
 /**
- * follow を経ていない送信者（導入前からの既存友だち）を、メッセージ受信時に友だち登録する（1文・原子的）。
+ * follow を経ていない送信者（導入前からの既存友だち）を、メッセージ受信時に友だち登録する（1 batch）。
  * - 既に登録済みなら何もしない（ON CONFLICT DO NOTHING＝既存行の状態・表示名を書き換えない）
- * - is_following は friend_follow_state があればその値、無ければ 1（メッセージを送れている＝ブロックしていない）
- * - フォロー履歴は本家 #174（upsertFriend）と同じく登録時刻を起点にする。ブロック状態で登録する時は
- *   開始日時を空にし、解除日時＝その状態のイベント時刻・解除回数 1 とする
+ * - 状態・履歴は friend_follow_state と保留分（K002）から作る。状態が無ければフォロー中・開始日時＝登録時刻
+ *   （本家 #174 の upsertFriend と同じ起点）
  * friend_add イベントは発火しない（既存友だちをあいさつシナリオに入れない）。
  */
 export async function registerFriendFromMessage(
@@ -298,35 +357,30 @@ export async function registerFriendFromMessage(
   input: { lineUserId: string; displayName: string | null; pictureUrl: string | null; statusMessage: string | null },
   nowJst: string,
 ): Promise<void> {
-  const state = `(SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = ?)`;
-  const stateAt = `(SELECT strftime('%Y-%m-%dT%H:%M:%f', s.state_at / 1000.0, 'unixepoch', '+9 hours') || '+09:00' FROM friend_follow_state s WHERE s.line_user_id = ?)`;
-  await db
-    .prepare(
-      `INSERT INTO friends
-         (id, line_user_id, display_name, picture_url, status_message, is_following,
-          first_followed_at, current_follow_started_at, last_followed_at, last_unfollowed_at, unfollow_count,
-          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?,
-               COALESCE(${state}, 1),
-               ?,
-               CASE WHEN COALESCE(${state}, 1) = 1 THEN ? ELSE NULL END,
-               ?,
-               CASE WHEN COALESCE(${state}, 1) = 0 THEN ${stateAt} ELSE NULL END,
-               CASE WHEN COALESCE(${state}, 1) = 0 THEN 1 ELSE 0 END,
-               ?, ?)
-       ON CONFLICT(line_user_id) DO NOTHING`,
-    )
-    .bind(
-      crypto.randomUUID(), input.lineUserId, input.displayName, input.pictureUrl, input.statusMessage,
-      input.lineUserId, // is_following
-      nowJst, // first_followed_at
-      input.lineUserId, nowJst, // current_follow_started_at
-      nowJst, // last_followed_at
-      input.lineUserId, input.lineUserId, // last_unfollowed_at
-      input.lineUserId, // unfollow_count
-      nowJst, nowJst,
-    )
-    .run();
+  const h = newFriendHistorySql('?');
+  const u = input.lineUserId;
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO friends
+           (id, line_user_id, display_name, picture_url, status_message, is_following,
+            first_followed_at, current_follow_started_at, last_followed_at, last_unfollowed_at, unfollow_count,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ${h.isFollowing}, ?, ${h.currentFollowStartedAt}, ${h.lastFollowedAt}, ${h.lastUnfollowedAt}, ${h.unfollowCount}, ?, ?)
+         ON CONFLICT(line_user_id) DO NOTHING`,
+      )
+      .bind(
+        crypto.randomUUID(), u, input.displayName, input.pictureUrl, input.statusMessage,
+        u, // is_following
+        nowJst, // first_followed_at
+        u, u, nowJst, // current_follow_started_at: following(u) + stateAt(u) + fallback
+        u, u, nowJst, // last_followed_at
+        u, u, // last_unfollowed_at
+        u, // unfollow_count
+        nowJst, nowJst,
+      ),
+    clearPendingStatement(db, u),
+  ]);
 }
 
 /** epoch ms → jstNow() と同じ形式（YYYY-MM-DDTHH:mm:ss.sss+09:00）。 */

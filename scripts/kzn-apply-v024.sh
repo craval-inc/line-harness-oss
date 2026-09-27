@@ -49,6 +49,7 @@ done
 
 step "④ kzn 後処理（マイル自動応答・ルール停止・移行由来マイル削除）"
 d1 --file="$K/kzn-post-v024.sql"
+echo "--- K002（kzn 専用・追記）"; d1 --file="$K/K002_follow_state_pending.sql"
 
 step "⑤ 検証ゲート（NG なら exit 1＝デプロイに進まない）"
 d1 --json --command "SELECT (SELECT COUNT(*) FROM friends) AS friends, (SELECT COUNT(*) FROM messages_log) AS msgs, (SELECT COUNT(*) FROM webhook_inbox) AS inbox, (SELECT COUNT(*) FROM unsent_messages) AS unsent" | tee "$OUT/after-counts.json"

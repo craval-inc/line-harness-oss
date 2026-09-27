@@ -108,5 +108,6 @@ export function createKznTestDb(): SqliteD1 {
   const db = new SqliteD1();
   db.raw.exec(readFileSync(join(dbPkg, 'bootstrap.sql'), 'utf8'));
   db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K001_webhook_inbox.sql'), 'utf8'));
+  db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K002_follow_state_pending.sql'), 'utf8'));
   return db;
 }

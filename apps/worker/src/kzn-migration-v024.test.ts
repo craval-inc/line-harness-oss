@@ -45,7 +45,10 @@ function applyUpstream(db: SqliteD1, opts: { post: boolean }) {
     if (f.startsWith('048_')) db.raw.exec(sql(join(KZN, 'kzn-pre-048.sql')));
     db.raw.exec(sql(join(MIG, f)));
   }
-  if (opts.post) db.raw.exec(sql(join(KZN, 'kzn-post-v024.sql')));
+  if (opts.post) {
+    db.raw.exec(sql(join(KZN, 'kzn-post-v024.sql')));
+    db.raw.exec(sql(join(KZN, 'K002_follow_state_pending.sql')));
+  }
   return files;
 }
 
@@ -78,6 +81,7 @@ function expectedSchema() {
   const ref = new SqliteD1();
   ref.raw.exec(sql(join(DB_PKG, 'bootstrap.sql')));
   ref.raw.exec(sql(join(KZN, 'K001_webhook_inbox.sql')));
+  ref.raw.exec(sql(join(KZN, 'K002_follow_state_pending.sql')));
   return remoteLikeSnapshot(ref).columns;
 }
 

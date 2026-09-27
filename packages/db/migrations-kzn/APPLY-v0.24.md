@@ -30,7 +30,7 @@ node ../../scripts/check-kzn-target.mjs
    確認: LINE Developers の「検証」が 503 になる／`wrangler tail -c wrangler.kzn.toml` に `maintenance mode` が出る。
 2. **退避・③migration・④後処理・⑤検証ゲート** — 一括スクリプト（最初の失敗で全体停止・exit 1）
    `bash ../../scripts/kzn-apply-v024.sh`
-   内容: bookmark 取得（`/c/temp/kzn/apply-*/bookmark.txt`）＋ export → 事前件数 → 本家 046〜047 → `kzn-pre-048.sql` → 本家 048〜072 → `kzn-post-v024.sql` → 事後件数が事前と一致 → `kzn-d1-gate.mjs`（期待スキーマ＝bootstrap.sql+K001 と一致・067 自動応答無効・有効マイルルール 0・available マイル 0）。
+   内容: bookmark 取得（`/c/temp/kzn/apply-*/bookmark.txt`）＋ export → 事前件数 → 本家 046〜047 → `kzn-pre-048.sql` → 本家 048〜072 → `kzn-post-v024.sql` → `K002_follow_state_pending.sql`（kzn 専用・追記）→ 事後件数が事前と一致 → `kzn-d1-gate.mjs`（期待スキーマ＝bootstrap.sql+K001+K002 と一致・067 自動応答無効・有効マイルルール 0・available マイル 0）。
 3. **メンテ解除で新 Worker をデプロイ**（⑥）
    `npx wrangler deploy -c wrangler.kzn.toml`（`--var` 無し＝`WEBHOOK_MAINTENANCE` 未設定）
    確認: 「検証」が 200。
@@ -51,6 +51,7 @@ node ../../scripts/check-kzn-target.mjs
 
 - 本家にも `046_affiliate_links.sql` / `046_link_tracking_controls.sql` があり、旧 `046_kzn_webhook_inbox.sql` と番号が衝突する。
 - kzn 専用 migration は `packages/db/migrations-kzn/K001...` に移した（本家の `migrations/`・リリースバンドル・sbo/fzk には混ぜない）。SQL 本文は旧 046 と同一なので **kzn 本番で再実行しない**。
+- `K002_follow_state_pending.sql`（友だち行の作成前に受けた unfollow の保留履歴）は今回新規。本手順の④の後に当てる（スクリプトに含む）。
 - kzn は wrangler の `d1 migrations` 管理テーブルを使っていない（手動 `d1 execute --file`）。
 
 ## 各ファイルの中身（kzn への影響）

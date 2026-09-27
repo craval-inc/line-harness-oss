@@ -677,6 +677,35 @@ describe('[v024-5] 受信箱経由でも本家 065 のフォロー履歴を同�
     });
   }, 15_000);
 
+  test('行作成前に follow(t1)→unfollow(t2)→follow(t3)、t1 の処理が最後に完了 → 再フォロー開始 t3・解除 t2・回数1（CODEX 再レビュー Med）', async () => {
+    const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 2), t3 = Date.UTC(2026, 8, 3);
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+    const gate1 = deferred(), gate3 = deferred(), reached1 = deferred(), reached3 = deferred();
+    lineMocks.getProfile
+      .mockImplementationOnce(async () => { reached1.resolve(); await gate1.promise; return { displayName: 'テスト太郎', userId: USER }; })
+      .mockImplementationOnce(async () => { reached3.resolve(); await gate3.promise; return { displayName: 'テスト太郎', userId: USER }; });
+    const handle = (ev: unknown) =>
+      handleWebhookEvent(db.asD1(), new LineClient('token'), ev as WebhookEvent, 'token', null, 'https://kzn.example', '', undefined, { inbox: true });
+
+    const p1 = handle(follow(t1));
+    await reached1.promise;              // t1: 状態を claim 済み・プロフィール取得待ち
+    await handle(unfollow(t2));          // 行が無いので解除は保留に記録
+    const p3 = handle(follow(t3));
+    await reached3.promise;              // t3: 状態を claim 済み・プロフィール取得待ち
+    gate1.resolve(); await p1;           // t1 が先に行を作る（最新状態 t3 と保留分から）
+    gate3.resolve(); await p3;           // t3 は既存行なのでプロフィール更新のみ
+    expect(hist()).toMatchObject({
+      is_following: 1, first_followed_at: J(t1), current_follow_started_at: J(t3), last_followed_at: J(t3),
+      last_unfollowed_at: J(t2), unfollow_count: 1,
+    });
+    expect(rows('SELECT pending_unfollow_count, pending_last_unfollowed_at FROM friend_follow_state WHERE line_user_id = ?', USER))
+      .toEqual([{ pending_unfollow_count: 0, pending_last_unfollowed_at: null }]);
+  }, 15_000);
+
   test('古い follow の遅延到着・同じ unfollow の再送では履歴も回数も変わらない', async () => {
     const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 5);
     await post([follow(t1)]);

@@ -4,7 +4,7 @@
 -- 適用順（2026-09-27 kzn 本番に実施済み）: このファイル → migrations-kzn/K001_webhook_inbox.sql（旧名 046_kzn_webhook_inbox.sql）。
 -- 本家 v0.24 へ上げる手順: migrations-kzn/APPLY-v0.24.md。
 -- ※ 記録用。新規に kzn 相当の環境を作る場合はこのファイルではなく packages/db/bootstrap.sql（本家・全 migration 反映済み）
---    → migrations-kzn/K001 → migrations-kzn/kzn-post-v024.sql の順で当てる。
+--    → migrations-kzn/K001 → migrations-kzn/kzn-post-v024.sql → migrations-kzn/K002 の順で当てる。
 -- 設計: kizuna-shonin/docs/line-harness-kzn-design.md §4
 
 PRAGMA defer_foreign_keys=TRUE;
