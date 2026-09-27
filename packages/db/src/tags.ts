@@ -1,5 +1,6 @@
 import { jstNow } from './utils.js';
 import { enqueueMileageEvent } from './mileage.js';
+import { isMileageDisabled } from './craval-flags.js';
 export interface Tag {
   id: string;
   name: string;
@@ -143,6 +144,7 @@ export async function enqueueHistoricTagMileage(
   db: D1Database,
   tagId: string,
 ): Promise<number> {
+  if (isMileageDisabled()) return 0; // [Craval kzn] マイレージ停止中は過去付与分も投入しない
   const now = jstNow();
   await db
     .prepare(

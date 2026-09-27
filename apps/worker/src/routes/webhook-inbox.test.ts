@@ -609,3 +609,82 @@ describe('[kzn-existing-friend] 受信箱モードで未登録の送信者を友
     expect(rows('SELECT * FROM webhook_inbox')).toHaveLength(0);
   }, 10_000);
 });
+
+
+// ─── CODEX v0.24 レビュー: メンテナンスモード / フォロー履歴（065）────────────────
+
+describe('[v024-1] WEBHOOK_MAINTENANCE=1 は署名検証後 503・D1 に一切書かない', () => {
+  test('正しい署名でも 503、受信箱・友だち・ログ・状態のいずれにも書かない', async () => {
+    const res = await post([follow(1000), text('m-200', 'メンテ中')], env({ WEBHOOK_MAINTENANCE: '1' }));
+    expect(res.status).toBe(503);
+    for (const t of ['webhook_inbox', 'friends', 'messages_log', 'friend_follow_state', 'unsent_messages', 'chats']) {
+      expect(rows(`SELECT * FROM ${t}`)).toHaveLength(0);
+    }
+  }, 10_000);
+
+  test('メンテ解除後に LINE が同じイベントを再送すれば通常どおり取り込まれる', async () => {
+    const events = [follow(1000), text('m-201', '再送分')];
+    expect((await post(events, env({ WEBHOOK_MAINTENANCE: '1' }))).status).toBe(503);
+    expect((await post(events)).status).toBe(200);
+    expect(rows("SELECT content FROM messages_log WHERE direction = 'incoming'")).toEqual([{ content: '再送分' }]);
+  }, 10_000);
+
+  test('不正署名は従来どおり 401（メンテでも署名検証が先）', async () => {
+    const { verifySignature } = await import('@line-crm/line-sdk');
+    vi.mocked(verifySignature).mockResolvedValueOnce(false);
+    const res = await post([text('m-202', 'x')], env({ WEBHOOK_MAINTENANCE: '1' }));
+    expect(res.status).toBe(401);
+  }, 10_000);
+
+  test('scheduled もメンテ中は何もしない（DB に触れない）', async () => {
+    const { scheduled } = await import('../scheduled.js');
+    const touched = vi.fn(() => { throw new Error('must not touch DB'); });
+    await expect(scheduled({ cron: '*/5 * * * *' } as ScheduledEvent, { WEBHOOK_MAINTENANCE: '1', DB: { prepare: touched, batch: touched } } as never, {} as ExecutionContext)).resolves.toBeUndefined();
+    expect(touched).not.toHaveBeenCalled();
+  });
+});
+
+describe('[v024-5] 受信箱経由でも本家 065 のフォロー履歴を同じ意味で更新する（イベント時刻基準）', () => {
+  const J = (ms: number) => new Date(ms + 9 * 3600_000).toISOString().replace('Z', '+09:00');
+  const hist = () => rows<Record<string, unknown>>(
+    'SELECT is_following, first_followed_at, current_follow_started_at, last_followed_at, last_unfollowed_at, unfollow_count FROM friends WHERE line_user_id = ?',
+    USER,
+  )[0];
+
+  test('follow → unfollow → 再 follow: 開始日時は再フォロー時刻・解除日時と回数が記録・初回は保持', async () => {
+    const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 5), t3 = Date.UTC(2026, 8, 9);
+    await post([follow(t1)]);
+    expect(hist()).toMatchObject({ is_following: 1, first_followed_at: J(t1), current_follow_started_at: J(t1), last_followed_at: J(t1), unfollow_count: 0 });
+    await post([unfollow(t2)]);
+    expect(hist()).toMatchObject({ is_following: 0, first_followed_at: J(t1), current_follow_started_at: null, last_unfollowed_at: J(t2), unfollow_count: 1 });
+    await post([follow(t3)]);
+    expect(hist()).toMatchObject({ is_following: 1, first_followed_at: J(t1), current_follow_started_at: J(t3), last_followed_at: J(t3), last_unfollowed_at: J(t2), unfollow_count: 1 });
+  }, 15_000);
+
+  test('古い follow の遅延到着・同じ unfollow の再送では履歴も回数も変わらない', async () => {
+    const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 5);
+    await post([follow(t1)]);
+    const uf = unfollow(t2);
+    await post([uf]);
+    const before = hist();
+    await post([follow(t1 - 1000)]);
+    await post([unfollow(t2, evId())]); // 同時刻の別イベント（再処理相当）
+    expect(hist()).toEqual(before);
+  }, 15_000);
+
+  test('未登録送信者のメッセージで登録: 開始日時あり・解除回数0（本家 #174 と同じ）', async () => {
+    await post([text('m-210', 'はじめて')]);
+    const h = hist();
+    expect(h.is_following).toBe(1);
+    expect(h.first_followed_at).not.toBeNull();
+    expect(h.current_follow_started_at).not.toBeNull();
+    expect(h.unfollow_count).toBe(0);
+  }, 10_000);
+
+  test('未登録で unfollow 済みの送信者: ブロック状態・開始日時なし・解除日時＝unfollow のイベント時刻・回数1', async () => {
+    const t = Date.UTC(2026, 8, 3);
+    await post([unfollow(t)]);
+    await post([text('m-211', 'ブロック後')]);
+    expect(hist()).toMatchObject({ is_following: 0, current_follow_started_at: null, last_unfollowed_at: J(t), unfollow_count: 1 });
+  }, 10_000);
+});

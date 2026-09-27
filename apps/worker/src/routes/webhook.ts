@@ -98,15 +98,21 @@ async function ensureFriendFromWebhookUser(
 
   if (lineAccountId && friend.line_account_id !== lineAccountId) {
     const now = jstNow();
-    await db
-      .prepare('UPDATE friends SET line_account_id = ?, is_following = 1, updated_at = ? WHERE id = ?')
-      .bind(lineAccountId, now, friend.id)
-      .run();
-    friend = { ...friend, line_account_id: lineAccountId, is_following: 1, updated_at: now };
     if (inbox) {
-      // [Craval kzn] 上の UPDATE が is_following=1 にするので、friend_follow_state の最新状態へ戻す。
+      // [Craval kzn] 受信箱モードではアカウントだけ更新し is_following は書き換えない（状態と履歴は
+      // friend_follow_state からの同期だけが決める。書き換えると同期時に解除回数が誤って増える）。
+      await db
+        .prepare('UPDATE friends SET line_account_id = ?, updated_at = ? WHERE id = ?')
+        .bind(lineAccountId, now, friend.id)
+        .run();
       await syncFriendFollowFromState(db, userId, now);
       friend = (await getFriendByLineUserId(db, userId)) ?? friend;
+    } else {
+      await db
+        .prepare('UPDATE friends SET line_account_id = ?, is_following = 1, updated_at = ? WHERE id = ?')
+        .bind(lineAccountId, now, friend.id)
+        .run();
+      friend = { ...friend, line_account_id: lineAccountId, is_following: 1, updated_at: now };
     }
   }
 
@@ -190,6 +196,14 @@ webhook.post('/webhook', async (c) => {
     // [Craval security C-2] HMAC 不一致も 401。
     console.error('Invalid LINE signature');
     return c.json({ status: 'invalid_signature' }, 401);
+  }
+
+  // [Craval kzn] WEBHOOK_MAINTENANCE=1（D1 migration 中）: 正しい署名の受信も D1 に一切書かずに 503 を返す。
+  // 非2xx なので「Webhookの再送」ON の LINE が後で再送する（再送の回数・間隔は LINE 非公開＝メンテは短時間で）。
+  // 未設定なら本家どおり。
+  if (c.env.WEBHOOK_MAINTENANCE === '1') {
+    console.warn('[webhook] maintenance mode: 503 (event will be redelivered by LINE)');
+    return c.json({ status: 'maintenance' }, 503);
   }
 
   let body: WebhookRequestBody;
@@ -372,7 +386,7 @@ async function handleEvent(
         displayName: profile?.displayName ?? null,
         pictureUrl: profile?.pictureUrl ?? null,
         statusMessage: profile?.statusMessage ?? null,
-      }, jstNow());
+      }, jstNow(), eventTimestamp);
       const upserted = await getFriendByLineUserId(db, userId);
       if (!upserted) throw new Error('friend upsert did not return a row');
       friend = upserted;

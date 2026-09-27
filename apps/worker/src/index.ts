@@ -115,6 +115,7 @@ export type Env = {
     EVENT_BUS_DISABLED?: string;    // "1" で fireEvent・auto_replies・マイレージ付与・クロスアカウント送信を停止
     MIRROR_URL?: string;            // 受信イベントの転送先（WEBHOOK_INBOX 時のみ）
     MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
+    WEBHOOK_MAINTENANCE?: string;   // "1" で D1 migration 用メンテ: /webhook は署名検証後 503・定期処理停止（D1 に書かない）
     ADMIN_COOKIE_SAMESITE?: string; // Optional override: 'Strict' | 'Lax' | 'None'
     ADMIN_ALLOW_CROSS_SITE?: string; // 'true' opts into SameSite=None cross-site cookies
     // External SSO into the admin session (GET /admin/sso). Optional: when the

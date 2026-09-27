@@ -95,6 +95,9 @@ if (!existsSync(tomlPath)) {
     }
   }
 
+  // WEBHOOK_MAINTENANCE は D1 migration の間だけ `wrangler deploy --var WEBHOOK_MAINTENANCE:1` で渡す（toml に書くと受信停止が常駐する）
+  if (tableValue(toml, 'vars', 'WEBHOOK_MAINTENANCE') !== null) errors.push('WEBHOOK_MAINTENANCE must not be in [vars] — pass it only via `--var WEBHOOK_MAINTENANCE:1` during migration');
+
   if (/^\s*\[\[r2_buckets\]\]/m.test(toml)) errors.push('R2 binding must not exist in kzn (incoming images are not stored)');
 }
 

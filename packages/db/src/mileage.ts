@@ -2,6 +2,7 @@
 export const LEGACY_MILEAGE_PROJECTION_VERSION = 1;
 
 import { jstNow } from './utils.js';
+import { isMileageDisabled, MileageDisabledError } from './craval-flags.js';
 
 export const DEFAULT_MILEAGE_PROGRAM_ID = 'default';
 
@@ -165,6 +166,7 @@ export async function enqueueMileageEvent(
   db: D1Database,
   input: EnqueueMileageEventInput,
 ): Promise<EngagementEvent> {
+  if (isMileageDisabled()) throw new MileageDisabledError('enqueueMileageEvent');
   const friend = await db
     .prepare(`SELECT id, user_id FROM friends WHERE id = ?`)
     .bind(input.friendId)
@@ -308,6 +310,7 @@ export async function postMileageEntry(
   input: PostMileageEntryInput,
   dailyCap?: MileageDailyCap,
 ): Promise<MileageLedgerEntry> {
+  if (isMileageDisabled()) throw new MileageDisabledError('postMileageEntry');
   if (!Number.isInteger(input.amount) || input.amount === 0) {
     throw new Error('Mileage amount must be a non-zero integer');
   }
@@ -1409,6 +1412,7 @@ export async function processPendingMileageEvents(
   db: D1Database,
   options: { limit?: number; now?: string } = {},
 ): Promise<MileageQueueResult> {
+  if (isMileageDisabled()) return { claimed: 0, processed: 0, failed: 0, granted: 0 };
   const limit = Math.min(250, Math.max(1, options.limit ?? 100));
   const now = options.now ?? jstNow();
   const hasLegacyClaims = !!await db.prepare(
@@ -1533,6 +1537,7 @@ export async function enqueueFollowingMileageMilestones(
   db: D1Database,
   options: { limitPerMilestone?: number; now?: string } = {},
 ): Promise<FollowingMileageReconcileResult> {
+  if (isMileageDisabled()) return { eventsCreated: 0, queued: 0 };
   const limit = Math.min(2000, Math.max(1, options.limitPerMilestone ?? 1000));
   const now = options.now ?? jstNow();
   const totals: FollowingMileageReconcileResult = { eventsCreated: 0, queued: 0 };

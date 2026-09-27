@@ -69,6 +69,11 @@ export async function scheduled(
   env: Env['Bindings'],
   ctx: ExecutionContext,
 ): Promise<void> {
+  // [Craval kzn] WEBHOOK_MAINTENANCE=1（D1 migration 中）は定期処理も一切動かさない（D1 に書かない）。
+  if (env.WEBHOOK_MAINTENANCE === '1') {
+    console.warn('[scheduled] maintenance mode: skipped');
+    return;
+  }
   // [Craval kzn] Cron / DO alarm のどちらから来ても送信禁止・イベントバス停止を反映する。
   applyCravalRuntimeFlags(env);
 
