@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { LineClient } from '@line-crm/line-sdk';
+import { LineClient, isLineSendDisabled, isLineMessageSendRequest } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import {
   getLineAccounts,
@@ -617,6 +617,13 @@ function proxyHandler(prefix: string, upstreamBase: string, logSends: boolean) {
 
     const method = c.req.method.toUpperCase();
     const isMessageSend = logSends && method === 'POST' && MESSAGE_SEND_PATHS.has(path);
+
+    // [Craval kzn] LINE_SEND_DISABLED=1 ではプロキシ経由（webhook の reply を含む）のメッセージ送信も拒否する。
+    // LineClient を通らず直接 fetch するため、ここでも止める。未設定なら本家どおり。
+    if (isLineSendDisabled() && isLineMessageSendRequest(method, path)) {
+      console.error(`[line-proxy] blocked message send (LINE_SEND_DISABLED=1): ${path}`);
+      return c.json({ message: 'LINE send disabled' }, 403);
+    }
 
     // Proxy 経由の自動送信と、人間が行う個別返信を区別する。未指定は従来どおり
     // external。manual は 1:1 push だけに限定し、一斉配信で未対応をまとめて消す

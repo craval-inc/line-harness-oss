@@ -127,6 +127,19 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   // /api/ で始まらないパスは認証 skip して static asset として返す。
   // (admin は別ホスト、Worker の non-API path はすべて LIFF/SPA 経由)
   const method = c.req.method.toUpperCase();
+
+  // [Craval kzn] PUBLIC_PATHS_ALLOW 設定時は、認証不要で到達できるパスを許可リスト（完全一致）だけに絞る。
+  // - 許可リスト内: 本家どおり素通し（/webhook は署名検証、/api/auth/login|logout は Cookie ログイン）
+  // - /api/ 以外: 404（LIFF/管理アセット・/auth・/setup・/images・/t・/r・/pool・/admin 等を閉じる）
+  // - /api/*: 本家の公開例外（/api/liff/・forms submit・stripe webhook・/api/qr 等）を無視して認証必須
+  // 未設定なら何もしない＝本家と同一挙動。
+  const allowList = parsePublicPathsAllow(c.env?.PUBLIC_PATHS_ALLOW);
+  if (allowList) {
+    if (allowList.includes(path)) return next();
+    if (!path.startsWith('/api/')) return c.json({ success: false, error: 'Not Found' }, 404);
+    return requireAuth(c, next);
+  }
+
   if (!path.startsWith('/api/')) {
     // ただし内部用エンドポイント (/webhook, /auth, /setup) は元の skip 判定に任せる
     if (
@@ -200,6 +213,18 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     return next();
   }
 
+  return requireAuth(c, next);
+}
+
+/** [Craval kzn] PUBLIC_PATHS_ALLOW をパース。未設定・空なら null（＝機能オフ）。 */
+export function parsePublicPathsAllow(raw: string | undefined): string[] | null {
+  if (!raw) return null;
+  const list = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 ? list : null;
+}
+
+/** Bearer / Cookie（+ CSRF）で認証する。本家 authMiddleware の末尾をそのまま切り出したもの。 */
+async function requireAuth(c: Context<Env>, next: Next): Promise<Response | void> {
   const bearer = bearerToken(c);
   const cookie = cookieToken(c);
   const token = bearer ?? cookie;

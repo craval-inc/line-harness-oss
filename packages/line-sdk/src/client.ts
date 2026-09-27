@@ -11,6 +11,32 @@ import type {
 
 const LINE_API_BASE = 'https://api.line.me';
 
+// [Craval kzn] LINE_SEND_DISABLED=1 の環境では、メッセージ送信系 API（reply/push/multicast/
+// broadcast/narrowcast 等 = POST /v2/bot/message/*）を例外で拒否する。GET（プロフィール・通数照会）は許可。
+// isolate 内の全 LineClient に効かせるためモジュールスコープのフラグにし、Worker の fetch/scheduled
+// 入口で env から毎回セットする。未設定なら false＝本家と同一挙動。
+let lineSendDisabled = false;
+
+export function setLineSendDisabled(disabled: boolean): void {
+  lineSendDisabled = disabled;
+}
+
+export function isLineSendDisabled(): boolean {
+  return lineSendDisabled;
+}
+
+/** POST /v2/bot/message/* ＝メッセージ送信か（プロキシ側のガードでも使う）。 */
+export function isLineMessageSendRequest(method: string, path: string): boolean {
+  return method.toUpperCase() !== 'GET' && path.startsWith('/v2/bot/message/');
+}
+
+export class LineSendDisabledError extends Error {
+  constructor(path: string) {
+    super(`LINE send disabled (LINE_SEND_DISABLED=1): ${path}`);
+    this.name = 'LineSendDisabledError';
+  }
+}
+
 export interface FollowersInsight {
   status: string;
   followers?: number;
@@ -60,6 +86,9 @@ export class LineClient {
     body?: unknown,
     requestHeaders: Record<string, string> = {},
   ): Promise<{ data: unknown; headers: Headers }> {
+    if (lineSendDisabled && isLineMessageSendRequest(method, path)) {
+      throw new LineSendDisabledError(path);
+    }
     const url = `${LINE_API_BASE}${path}`;
 
     const options: RequestInit = {

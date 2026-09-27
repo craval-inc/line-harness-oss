@@ -88,6 +88,8 @@ import {
   resolveOgForForm,
   resolveOgForAccount,
 } from './lib/og-resolver.js';
+import { webhookInboxAdmin } from './routes/webhook-inbox-admin.js';
+import { applyCravalRuntimeFlags } from './craval-runtime-flags.js';
 
 export type Env = {
   Bindings: {
@@ -105,6 +107,14 @@ export type Env = {
     WORKER_URL: string;
     // Admin auth topology (see middleware/admin-auth-config.ts):
     ADMIN_ORIGIN?: string;          // Comma-separated admin web origin allowlist for credentialed CORS
+    // [Craval kzn] 以下は kzn（きずな）インスタンス用。全て未設定なら本家と同一挙動。
+    PUBLIC_PATHS_ALLOW?: string;    // 認証不要パスの許可リスト（カンマ区切り・完全一致）。設定時、それ以外の非 /api は 404
+    INCOMING_IMAGE_STORE?: string;  // "0" で受信画像を R2 に保存しない
+    WEBHOOK_INBOX?: string;         // "1" で Webhook 受信箱（同期保存・重複排除・再処理）
+    LINE_SEND_DISABLED?: string;    // "1" で LINE メッセージ送信 API を全拒否（LineClient とプロキシ）
+    EVENT_BUS_DISABLED?: string;    // "1" で fireEvent・auto_replies・マイレージ付与・クロスアカウント送信を停止
+    MIRROR_URL?: string;            // 受信イベントの転送先（WEBHOOK_INBOX 時のみ）
+    MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
     ADMIN_COOKIE_SAMESITE?: string; // Optional override: 'Strict' | 'Lax' | 'None'
     ADMIN_ALLOW_CROSS_SITE?: string; // 'true' opts into SameSite=None cross-site cookies
     // External SSO into the admin session (GET /admin/sso). Optional: when the
@@ -256,6 +266,8 @@ app.route('/', webinarRoutes);
 app.route('/', instagramEngagement);
 // LINE Messaging API 互換プロキシ — 外部エージェントの直接送信を messages_log に残す
 app.route('/', lineProxy);
+// [Craval kzn] 受信箱の状態確認・打ち切り行の再試行（WEBHOOK_INBOX=1 の時だけ有効・認証必須）
+app.route('/', webhookInboxAdmin);
 
 // Phase 5 (upgrade flow) — public build metadata endpoint. Mounted under
 // /admin/ but intentionally unauthenticated: the dashboard fetches /admin/version
@@ -974,7 +986,12 @@ app.notFound(notFoundHandler);
 export { TenantScheduler };
 
 export default {
-  fetch: app.fetch,
+  // [Craval kzn] LINE_SEND_DISABLED / EVENT_BUS_DISABLED は isolate 内の全呼び出しに効かせるため、
+  // リクエスト毎に env から反映する。未設定なら false＝本家と同一挙動。
+  fetch: (request: Request, env?: Env['Bindings'], ctx?: ExecutionContext) => {
+    applyCravalRuntimeFlags(env);
+    return app.fetch(request, env, ctx);
+  },
   scheduled,
 };
 // redeploy trigger

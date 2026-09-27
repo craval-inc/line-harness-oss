@@ -1,4 +1,11 @@
-export { LineClient, LineApiError } from './client.js';
+export {
+  LineClient,
+  LineApiError,
+  setLineSendDisabled,
+  isLineSendDisabled,
+  isLineMessageSendRequest,
+  LineSendDisabledError,
+} from './client.js';
 export type {
   FollowersInsight,
   FollowerIdsPage,

@@ -22,6 +22,9 @@ import { sendBookingNotification } from './services/booking-notifier.js';
 import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
 import { lineProxy } from './routes/line-proxy.js';
 import type { Env } from './index.js';
+import { applyCravalRuntimeFlags } from './craval-runtime-flags.js';
+import { handleWebhookEvent, incomingImageBucket } from './routes/webhook.js';
+import { inboxEnabled, mirrorEnabled, warnMirrorMisconfigOnce, runInboxMaintenance } from './services/webhook-inbox.js';
 
 /**
  * 5分に1回だけ通すゲート。
@@ -66,8 +69,45 @@ export async function scheduled(
   env: Env['Bindings'],
   ctx: ExecutionContext,
 ): Promise<void> {
+  // [Craval kzn] Cron / DO alarm のどちらから来ても送信禁止・イベントバス停止を反映する。
+  applyCravalRuntimeFlags(env);
+
   // Get all active accounts from DB
   const dbAccounts = await getLineAccounts(env.DB);
+
+  // [Craval kzn] Webhook 受信箱: 未処理行の再処理・未転送行の再転送・保持期限切れの削除。
+  if (inboxEnabled(env)) {
+    warnMirrorMisconfigOnce(env);
+    try {
+      const accountTokens = new Map<string, string>();
+      for (const account of dbAccounts) {
+        if (account.is_active) accountTokens.set(account.id, account.channel_access_token);
+      }
+      const result = await runInboxMaintenance({
+        db: env.DB,
+        process: async (event, lineAccountId) => {
+          const token = (lineAccountId && accountTokens.get(lineAccountId)) || env.LINE_CHANNEL_ACCESS_TOKEN;
+          await handleWebhookEvent(
+            env.DB,
+            new LineClient(token),
+            event,
+            token,
+            lineAccountId,
+            env.WORKER_URL,
+            env.LIFF_URL,
+            incomingImageBucket(env),
+            { inbox: true, eventBusDisabled: env.EVENT_BUS_DISABLED === '1' },
+          );
+        },
+        mirror: mirrorEnabled(env) ? { url: env.MIRROR_URL!, secret: env.MIRROR_SECRET } : null,
+      });
+      if (result.reprocessed + result.reprocessFailed + result.remirrored + result.remirrorFailed + result.purged > 0) {
+        console.log(`[webhook-inbox] ${JSON.stringify(result)}`);
+      }
+    } catch (e) {
+      console.error('webhook-inbox maintenance error:', e);
+    }
+  }
 
   // Build LineClient map for insight fetching (keyed by account id)
   const lineClients = new Map<string, LineClient>();

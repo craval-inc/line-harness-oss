@@ -31,6 +31,18 @@ import {
   type TagAutomationDispatch,
 } from './tag-automation-context.js';
 
+// [Craval kzn] EVENT_BUS_DISABLED=1 の環境では fireEvent を丸ごと無効化する（送信Webhook・スコア・自動化・
+// automation_logs 保存を行わない）。Worker の fetch/scheduled 入口で env から毎回反映。未設定なら本家どおり。
+let eventBusDisabled = false;
+
+export function setEventBusDisabled(disabled: boolean): void {
+  eventBusDisabled = disabled;
+}
+
+export function isEventBusDisabled(): boolean {
+  return eventBusDisabled;
+}
+
 export interface EventPayload {
   friendId?: string;
   eventData?: Record<string, unknown>;
@@ -56,6 +68,7 @@ export async function fireEvent(
   lineAccountId?: string | null,
   dispatch: TagAutomationDispatch = createTagAutomationDispatch(),
 ): Promise<void> {
+  if (eventBusDisabled) return;
   if (eventType === 'tag_change' && payload.friendId) {
     const tagId = payload.eventData?.tagId;
     const action = payload.eventData?.action;

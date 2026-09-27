@@ -406,6 +406,9 @@ const KNOWN_GAPS: readonly string[] = [
   'GET /api/usage',
   // users-grouped (1)
   'GET /api/users-grouped',
+  // [Craval kzn] kzn 専用の運用 API（WEBHOOK_INBOX=1 以外は 404）。本家 spec には載せない
+  'GET /api/webhook-inbox/status',
+  'POST /api/webhook-inbox/retry',
 ];
 
 describe('OpenAPI カバレッジ', () => {
