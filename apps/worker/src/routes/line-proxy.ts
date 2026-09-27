@@ -269,7 +269,7 @@ async function createFriendForRecipient(
     try {
       profile = await lineClient.getProfile(userId);
     } catch (err) {
-      console.error('[line-proxy] getProfile failed for', userId, err);
+      console.error('[line-proxy] getProfile failed', err); // [Craval security M-5] userId を出さない
     }
 
     const friend = await upsertFriend(db, {
@@ -289,7 +289,7 @@ async function createFriendForRecipient(
     }
     return friend;
   } catch (err) {
-    console.error('[line-proxy] friend creation failed for', userId, err);
+    console.error('[line-proxy] friend creation failed', err); // [Craval security M-5]
     return null;
   }
 }

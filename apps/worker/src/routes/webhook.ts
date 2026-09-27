@@ -20,6 +20,7 @@ import { matchAndReply } from '../services/auto-reply.js';
 import { buildMessage } from '../services/step-delivery.js';
 import { pushImmediateFirstStep } from '../services/immediate-first-step.js';
 import type { Env } from '../index.js';
+import { hashPIIPrefix } from '../utils/pii-hash.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
 import { replyViaHarnessProxy } from '../services/line-proxy-send.js';
 import type { HarnessProxyDispatch } from '../services/line-proxy-send.js';
@@ -50,7 +51,7 @@ async function ensureFriendFromWebhookUser(
       // A signed webhook already proves this user interacted with the bot.
       // If profile lookup is temporarily unavailable, keep the event processable
       // by creating the friend with the LINE userId and filling profile later.
-      console.error('[webhook] Failed to get profile for unknown user', userId, err);
+      console.error(`[webhook] Failed to get profile for unknown user userIdHash=${await hashPIIPrefix(userId)}`, err);
     }
 
     friend = await upsertFriend(db, {
@@ -59,7 +60,7 @@ async function ensureFriendFromWebhookUser(
       pictureUrl: profile?.pictureUrl ?? null,
       statusMessage: profile?.statusMessage ?? null,
     });
-    console.log(`[webhook] auto-registered existing friend userId=${userId} friendId=${friend.id}`);
+    console.log(`[webhook] auto-registered existing friend userIdHash=${await hashPIIPrefix(userId)} friendId=${friend.id}`);
   }
 
   if (lineAccountId && friend.line_account_id !== lineAccountId) {
@@ -102,8 +103,9 @@ webhook.post('/webhook', async (c) => {
   // for junk traffic on a public endpoint.
   const LINE_SIGNATURE_LENGTH = 44;
   if (signature.length !== LINE_SIGNATURE_LENGTH) {
+    // [Craval security C-2] 不正シグネチャは 401。200 だと CF の status 集計で検知できず LINE の再送機構も無効になる。
     console.error('Missing or malformed LINE signature');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_signature' }, 401);
   }
 
   // Verify signature BEFORE JSON.parse so attacker-controlled bodies never reach the parser.
@@ -147,16 +149,18 @@ webhook.post('/webhook', async (c) => {
   }
 
   if (!valid) {
+    // [Craval security C-2] HMAC 不一致も 401。
     console.error('Invalid LINE signature');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_signature' }, 401);
   }
 
   let body: WebhookRequestBody;
   try {
     body = JSON.parse(rawBody) as WebhookRequestBody;
   } catch {
+    // [Craval security C-2] 署名は正しいがパース不能＝不正ボディ。
     console.error('Failed to parse webhook body');
-    return c.json({ status: 'ok' }, 200);
+    return c.json({ status: 'invalid_body' }, 400);
   }
 
   const lineClient = new LineClient(channelAccessToken);
@@ -211,17 +215,19 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    console.log(`[follow] userId=${userId} lineAccountId=${lineAccountId}`);
+    // [Craval security M-5] userId(=PII)を hash prefix 化
+    console.log(`[follow] userIdHash=${await hashPIIPrefix(userId)} lineAccountId=${lineAccountId}`);
 
     // プロフィール取得 & 友だち登録/更新
     let profile;
     try {
       profile = await lineClient.getProfile(userId);
     } catch (err) {
-      console.error('Failed to get profile for', userId, err);
+      console.error(`Failed to get profile for userIdHash=${await hashPIIPrefix(userId)}`, err);
     }
 
-    console.log(`[follow] profile=${profile?.displayName ?? 'null'}`);
+    // [Craval security M-5] displayName は PII なので取得成否のみ
+    console.log(`[follow] profile_fetched=${profile ? 'ok' : 'fail'}`);
 
     const friend = await upsertFriend(db, {
       lineUserId: userId,
@@ -309,7 +315,7 @@ async function handleEvent(
               skipCooldown: true,
             },
           );
-          if (sent) console.log(`Immediate delivery: sent scenario ${scenario.id} step 1 to ${userId}`);
+          if (sent) console.log(`Immediate delivery: sent scenario ${scenario.id} step 1 to userIdHash=${await hashPIIPrefix(userId)}`);
         } catch (err) {
           console.error('Failed to enroll friend in scenario', scenario.id, err);
         }

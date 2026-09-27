@@ -51,6 +51,7 @@ import {
   LIFF_HASH,
   WORKER_ASSETS_HASH,
 } from '../_version.js';
+import { safeEqual } from '../utils/pii-hash.js';
 
 /**
  * Env bindings consumed by this router. Kept local because only this file
@@ -107,7 +108,8 @@ function adaptD1(db: D1Database): D1Like {
 /** Auth gate — single source of truth for every endpoint in this router. */
 app.use('/*', async (c, next) => {
   const key = c.req.header('x-admin-api-key');
-  if (!key || key !== c.env.ADMIN_API_KEY) {
+  // [Craval security M-2] 定数時間比較（ADMIN_API_KEY 未設定なら常に拒否）
+  if (!key || !c.env.ADMIN_API_KEY || !safeEqual(key, c.env.ADMIN_API_KEY)) {
     return c.text('unauthorized', 401);
   }
   await next();

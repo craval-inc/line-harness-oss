@@ -3,6 +3,7 @@ import { getStaffByApiKey } from '@line-crm/db';
 import type { Env } from '../index.js';
 import type { AdminSameSite } from './admin-auth-config.js';
 import { safeDecode } from '../utils/safe-decode.js';
+import { safeEqual } from '../utils/pii-hash.js';
 
 export const ADMIN_AUTH_COOKIE = 'lh_admin_session';
 export const CSRF_COOKIE = 'lh_csrf';
@@ -95,7 +96,8 @@ export async function authenticateApiToken(
   }
 
   // Fallback: env API_KEY acts as owner (current rotation slot)
-  if (token === c.env.API_KEY) {
+  // [Craval security M-2] 定数時間比較
+  if (c.env.API_KEY && safeEqual(token, c.env.API_KEY)) {
     return { id: 'env-owner', name: 'Owner', role: 'owner' };
   }
 
@@ -107,7 +109,7 @@ export async function authenticateApiToken(
   if (
     c.env.LEGACY_API_KEY &&
     c.env.LEGACY_API_KEY !== c.env.API_KEY &&
-    token === c.env.LEGACY_API_KEY
+    safeEqual(token, c.env.LEGACY_API_KEY)
   ) {
     console.log('[auth] accept_via=LEGACY_API_KEY');
     return { id: 'env-owner', name: 'Owner', role: 'owner' };
@@ -188,7 +190,6 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/setup' ||
     path === '/api/integrations/stripe/webhook' ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
-    path === '/api/meet-callback' || // Meet Harness completion callback
     // Google OAuth redirects without admin headers. Route verifies a signed, expiring state.
     (path === '/api/booking/google-calendar/oauth/callback' && method === 'GET') ||
     path === '/api/qr' || // Public QR proxy — used by desktop landing pages

@@ -164,7 +164,7 @@ describe('POST /webhook — DoS defenses (#104)', () => {
       baseEnv,
       baseExecutionCtx,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401); // [Craval security C-2] 不正署名は 401（本家は 200）
     // verifySignature must run; rejection happens before any parse attempt.
     expect(verifySignature).toHaveBeenCalled();
     expect(verifySignature).toHaveBeenCalledWith('env-default-secret', '{not valid json', validShapedSignature);
@@ -185,7 +185,7 @@ describe('POST /webhook — DoS defenses (#104)', () => {
       baseEnv,
       baseExecutionCtx,
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401); // [Craval security C-2] 不正署名は 401（本家は 200）
     // Fast-rejected before any crypto / DB work.
     expect(verifySignature).not.toHaveBeenCalled();
   });

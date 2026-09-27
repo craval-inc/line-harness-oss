@@ -24,6 +24,42 @@ function validateSecret(secret: unknown): string | null {
   return null;
 }
 
+// [Craval security C-5] SSRF対策: 送信先ホストが内部/プライベート宛でないか検査する。
+// 完全な DNS リバインディング防止は配信時の解決が要るが、リテラルの private/loopback/
+// link-local IP と localhost 系ホスト名を拒否するだけで代表的な内部アクセスを塞げる。
+export function isBlockedHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase(); // IPv6 の角括弧を除去
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host === 'metadata.google.internal'
+  ) {
+    return true;
+  }
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (
+      a === 0 || // 0.0.0.0/8
+      a === 10 || // 10.0.0.0/8
+      a === 127 || // loopback
+      (a === 169 && b === 254) || // link-local / cloud metadata 169.254.169.254
+      (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+      (a === 192 && b === 168) || // 192.168.0.0/16
+      (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64.0.0/10
+    ) {
+      return true;
+    }
+  }
+  // IPv6 loopback / unique-local(fc00::/7) / link-local(fe80::/10) / unspecified
+  if (host === '::1' || host === '::' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) {
+    return true;
+  }
+  return false;
+}
+
 function validateHttpsUrl(url: unknown): string | null {
   if (typeof url !== 'string' || url.length === 0) {
     return 'url is required';
@@ -36,6 +72,9 @@ function validateHttpsUrl(url: unknown): string | null {
   }
   if (parsed.protocol !== 'https:') {
     return 'url must use https:// scheme';
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    return 'url must not point to a private or internal host';
   }
   return null;
 }

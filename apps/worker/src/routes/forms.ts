@@ -642,8 +642,9 @@ forms.post('/api/forms/:id/submit', async (c) => {
         (async () => {
           console.log('Form reply: starting for friendId', friendId);
           const friend = await getFriendById(db, friendId!);
-          if (!friend?.line_user_id) { console.log('Form reply: no line_user_id'); return; }
-          console.log('Form reply: sending to', friend.line_user_id);
+          // [Craval security M-5] line_user_id(=PII)を直接出さない。friendId で相関は取れる
+          if (!friend?.line_user_id) { console.log('Form reply: no line_user_id for friendId', friendId); return; }
+          console.log('Form reply: sending for friendId', friendId);
           const accessToken = await resolveFriendAccessToken(
             db,
             friend,

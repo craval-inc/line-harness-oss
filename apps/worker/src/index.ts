@@ -66,7 +66,9 @@ import { defaultCachePolicyMiddleware } from './middleware/cache-policy.js';
 import booking from './routes/booking.js';
 import events from './routes/events.js';
 import { trafficPools } from './routes/traffic-pools.js';
-import { meetCallback } from './routes/meet-callback.js';
+// [Craval security C-1] meet-callback は完全無認証で任意の Flex メッセージを送信できる (CRITICAL)。
+// Meet Harness 連携を使わないため無効化（本家 v0.24 時点でも無認証のまま）。
+// import { meetCallback } from './routes/meet-callback.js';
 import { messageTemplates } from './routes/message-templates.js';
 import dedupPreview from './routes/dedup-preview.js';
 import { profileRefresh } from './routes/profile-refresh.js';
@@ -245,7 +247,7 @@ app.route('/', trafficPools);
 app.route('/', booking);
 app.route('/', events);
 app.route('/', accountSettings);
-app.route('/', meetCallback);
+// app.route('/', meetCallback); // [Craval security C-1]
 app.route('/', messageTemplates);
 app.route('/', dedupPreview);
 app.route('/', profileRefresh);
