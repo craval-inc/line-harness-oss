@@ -24,7 +24,7 @@ account_id = "01547b03881149dd0db10da0da6928c8"
 [[d1_databases]]
 binding = "DB"
 database_name = "line-harness-kzn"
-database_id = "TBD_KZN_D1_ID"
+database_id = "d13fdca6-6e95-4084-8a34-b3709a0a92f7"
 
 [triggers]
 crons = ["*/5 * * * *", "0 */6 * * *"]
@@ -36,7 +36,7 @@ crons = ["*/5 * * * *", "0 */6 * * *"]
 WORKER_NAME = "line-harness-kzn"
 ADMIN_PAGES_PROJECT = ""
 LIFF_PAGES_PROJECT = ""
-D1_DATABASE_ID = "TBD_KZN_D1_ID"
+D1_DATABASE_ID = "d13fdca6-6e95-4084-8a34-b3709a0a92f7"
 # 本家からの自動アップデートは無効（M-2・セキュリティ方針）。
 MANIFEST_URL = ""
 WORKER_PUBLIC_URL = "https://line-harness-kzn.bkobu-yd.workers.dev"
