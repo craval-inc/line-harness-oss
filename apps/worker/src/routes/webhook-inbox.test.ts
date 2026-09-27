@@ -757,6 +757,15 @@ describe('[v024-5b] 行作成前の unfollow 保留（K002）の原子性・冪�
     expect(hist()).toMatchObject({ is_following: 0, last_unfollowed_at: J(t), unfollow_count: 1 });
   }, 10_000);
 
+  test('同時刻の follow → unfollow（行なし）は本当の遷移として保留1、同じ unfollow の再処理では増えない', async () => {
+    const t = Date.UTC(2026, 8, 4);
+    expect(await claimFollowTransition(db.asD1(), USER, true, t)).toBe(true);
+    expect(await claimFollowTransition(db.asD1(), USER, false, t)).toBe(true);
+    expect(pending()).toEqual({ is_following: 0, state_at: t, pending_unfollow_count: 1, pending_last_unfollowed_at: t });
+    await claimFollowTransition(db.asD1(), USER, false, t);
+    expect(pending()).toMatchObject({ pending_unfollow_count: 1 });
+  });
+
   test('友だち行がある時の unfollow は保留に入れず friends 側で1回だけ数える', async () => {
     const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 2);
     await post([follow(t1)]);

@@ -215,9 +215,11 @@ export async function claimFollowTransition(
     return (res.meta?.changes ?? 0) >= 1;
   }
   // unfollow: 状態の記録と「友だち行が無い間の解除履歴（K002 保留分）」を1文で行う（間に行作成が割り込む隙を作らない）。
-  // 保留の加算は状態時刻が真に新しくなった時だけ＝同じイベントの再処理（同時刻）では二重に数えない。
+  // 保留の加算は本当の遷移の時だけ: 状態時刻が新しくなった、または直前がフォロー中（同時刻の follow→unfollow）。
+  // 同じ unfollow の再処理（同時刻・直前も unfollow）では二重に数えない。
   // 友だち行がある時は保留に入れない（friends 側の履歴は syncFriendFollowFromState が状態遷移で数える）。
   const noFriend = 'NOT EXISTS (SELECT 1 FROM friends f WHERE f.line_user_id = ?)';
+  const genuine = '(excluded.state_at > friend_follow_state.state_at OR friend_follow_state.is_following = 1)';
   const res = await db
     .prepare(
       `INSERT INTO friend_follow_state (line_user_id, is_following, state_at, pending_unfollow_count, pending_last_unfollowed_at)
@@ -226,9 +228,9 @@ export async function claimFollowTransition(
          is_following = 0,
          state_at = excluded.state_at,
          pending_unfollow_count = friend_follow_state.pending_unfollow_count
-           + CASE WHEN excluded.state_at > friend_follow_state.state_at AND ${noFriend} THEN 1 ELSE 0 END,
+           + CASE WHEN ${genuine} AND ${noFriend} THEN 1 ELSE 0 END,
          pending_last_unfollowed_at = CASE
-           WHEN excluded.state_at > friend_follow_state.state_at AND ${noFriend}
+           WHEN ${genuine} AND ${noFriend}
              THEN MAX(COALESCE(friend_follow_state.pending_last_unfollowed_at, 0), excluded.state_at)
            ELSE friend_follow_state.pending_last_unfollowed_at END
         WHERE excluded.state_at >= friend_follow_state.state_at`,
