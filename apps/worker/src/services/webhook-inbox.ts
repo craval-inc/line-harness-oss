@@ -263,6 +263,29 @@ export async function upsertFriendAndSyncFollow(
   ]);
 }
 
+/**
+ * follow を経ていない送信者（導入前からの既存友だち）を、メッセージ受信時に友だち登録する（1文・原子的）。
+ * - 既に登録済みなら何もしない（ON CONFLICT DO NOTHING＝既存行の状態・表示名を書き換えない）
+ * - is_following は friend_follow_state があればその値、無ければ 1（メッセージを送れている＝ブロックしていない）
+ * friend_add イベントは発火しない（既存友だちをあいさつシナリオに入れない）。
+ */
+export async function registerFriendFromMessage(
+  db: D1Database,
+  input: { lineUserId: string; displayName: string | null; pictureUrl: string | null; statusMessage: string | null },
+  nowJst: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO friends (id, line_user_id, display_name, picture_url, status_message, is_following, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?,
+               COALESCE((SELECT s.is_following FROM friend_follow_state s WHERE s.line_user_id = ?), 1),
+               ?, ?)
+       ON CONFLICT(line_user_id) DO NOTHING`,
+    )
+    .bind(crypto.randomUUID(), input.lineUserId, input.displayName, input.pictureUrl, input.statusMessage, input.lineUserId, nowJst, nowJst)
+    .run();
+}
+
 /** epoch ms → jstNow() と同じ形式（YYYY-MM-DDTHH:mm:ss.sss+09:00）。 */
 export function toJstFromEpoch(ms: number): string {
   return new Date(ms + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');

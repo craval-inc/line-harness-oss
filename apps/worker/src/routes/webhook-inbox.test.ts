@@ -547,3 +547,63 @@ describe('[review3-C] 再処理で対応済みチャットを未読に戻さな�
     expect(rows('SELECT status FROM chats')).toEqual([{ status: 'unread' }]);
   }, 10_000);
 });
+
+
+// ─── follow を経ていない既存友だち（本番 258 人）からの受信 ───────────────────
+
+describe('[kzn-existing-friend] 受信箱モードで未登録の送信者を友だち登録して記録する', () => {
+  const MIRROR = { MIRROR_URL: 'https://mirror.example/api/line-harness-event', MIRROR_SECRET: 'mirror-secret' };
+
+  test('未登録送信者の text → friends 1件・messages_log 1件・ミラーに displayName・friend_add は発火しない', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return new Response('ok', { status: 200 });
+    }));
+    try {
+      const ev = text('m-100', '既存友だちからの相談');
+      await post([ev], env(MIRROR));
+      expect(rows('SELECT display_name, is_following FROM friends WHERE line_user_id = ?', USER))
+        .toEqual([{ display_name: 'テスト太郎', is_following: 1 }]);
+      expect(rows("SELECT content FROM messages_log WHERE direction = 'incoming'")).toEqual([{ content: '既存友だちからの相談' }]);
+      expect(rows('SELECT * FROM chats')).toHaveLength(1);
+      const payload = JSON.parse(bodies.find((b) => JSON.parse(b).webhookEventId === ev.webhookEventId)!);
+      expect(payload.displayName).toBe('テスト太郎');
+      expect(vi.mocked(fireEvent).mock.calls.some((c) => c[1] === 'friend_add')).toBe(false);
+      expect(rows('SELECT * FROM friend_scenarios')).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 10_000);
+
+  test('プロフィール取得に失敗しても登録・記録する（表示名は null）', async () => {
+    lineMocks.getProfile.mockRejectedValue(new Error('profile 404'));
+    await post([text('m-101', 'プロフィール取れない')]);
+    expect(rows('SELECT display_name, is_following FROM friends WHERE line_user_id = ?', USER))
+      .toEqual([{ display_name: null, is_following: 1 }]);
+    expect(rows("SELECT content FROM messages_log WHERE direction = 'incoming'")).toEqual([{ content: 'プロフィール取れない' }]);
+  }, 10_000);
+
+  test('unfollow 済み（friend_follow_state=0）の送信者は is_following=0 のまま登録', async () => {
+    await post([unfollow(3000)]); // 未登録のまま状態だけ記録される
+    await post([text('m-102', 'ブロック後に届いた')]);
+    expect(rows('SELECT is_following FROM friends WHERE line_user_id = ?', USER)).toEqual([{ is_following: 0 }]);
+    expect(rows("SELECT * FROM messages_log WHERE direction = 'incoming'")).toHaveLength(1);
+  }, 10_000);
+
+  test('未登録送信者の画像・postback も記録する', async () => {
+    await post([image('img-100')]);
+    await post([{ type: 'postback', webhookEventId: evId(), timestamp: 8000, replyToken: 'rt', source: { type: 'user', userId: USER }, mode: 'active', deliveryContext: { isRedelivery: false }, postback: { data: 'menu=2' } }]);
+    expect(rows('SELECT * FROM friends')).toHaveLength(1);
+    expect(rows("SELECT source, content FROM messages_log WHERE direction = 'incoming' ORDER BY source")).toEqual([
+      { source: 'postback', content: 'menu=2' },
+      { source: 'user', content: '[画像]' },
+    ]);
+  }, 10_000);
+
+  test('env 未設定（従来）では未登録送信者のメッセージは従来どおり記録しない', async () => {
+    await post([text('m-103', 'legacy')], env({ WEBHOOK_INBOX: undefined }));
+    expect(rows('SELECT * FROM friends')).toHaveLength(0);
+    expect(rows('SELECT * FROM messages_log')).toHaveLength(0);
+  }, 10_000);
+});

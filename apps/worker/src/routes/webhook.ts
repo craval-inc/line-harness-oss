@@ -34,6 +34,7 @@ import {
   claimFollowTransition,
   syncFriendFollowFromState,
   upsertFriendAndSyncFollow,
+  registerFriendFromMessage,
   touchChatOnIncomingEvent,
   insertIncomingLog,
   UNSENT_PLACEHOLDER,
@@ -487,7 +488,8 @@ async function handleEvent(
     const userId = event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
+    // [Craval kzn] 受信箱モードでは follow を経ていない既存友だちも登録して記録する（従来は未登録なら破棄）。
+    const friend = inbox ? await ensureInboxFriend(db, lineClient, userId) : await getFriendByLineUserId(db, userId);
     if (!friend) return;
 
     const postbackData = (event as unknown as { postback: { data: string } }).postback.data;
@@ -577,7 +579,8 @@ async function handleEvent(
   if (event.type === 'message' && event.message.type !== 'text') {
     const userId = event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
-    const friend = await getFriendByLineUserId(db, userId);
+    // [Craval kzn] 受信箱モードでは follow を経ていない既存友だちも登録して記録する（従来は未登録なら破棄）。
+    const friend = inbox ? await ensureInboxFriend(db, lineClient, userId) : await getFriendByLineUserId(db, userId);
     if (!friend) return;
 
     const msg = event.message as { id: string; type: string; fileName?: string; title?: string };
@@ -635,7 +638,8 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
+    // [Craval kzn] 受信箱モードでは follow を経ていない既存友だちも登録して記録する（従来は未登録なら破棄）。
+    const friend = inbox ? await ensureInboxFriend(db, lineClient, userId) : await getFriendByLineUserId(db, userId);
     if (!friend) return;
 
     const now = jstNow();
@@ -815,6 +819,29 @@ async function handleEvent(
 
     return;
   }
+}
+
+/**
+ * [Craval kzn] 受信箱モードで、メッセージ送信者が未登録なら友だち登録してから返す。
+ * プロフィール取得は失敗しても続行（表示名なしで登録）。friend_add は発火しない。
+ */
+async function ensureInboxFriend(db: D1Database, lineClient: LineClient, userId: string) {
+  const existing = await getFriendByLineUserId(db, userId);
+  if (existing) return existing;
+  let profile: { displayName?: string; pictureUrl?: string; statusMessage?: string } | undefined;
+  try {
+    profile = await lineClient.getProfile(userId);
+  } catch (err) {
+    // [Craval security M-5] userId は出さない
+    console.error('[inbox] profile fetch failed for unregistered sender', err instanceof Error ? err.message : err);
+  }
+  await registerFriendFromMessage(db, {
+    lineUserId: userId,
+    displayName: profile?.displayName ?? null,
+    pictureUrl: profile?.pictureUrl ?? null,
+    statusMessage: profile?.statusMessage ?? null,
+  }, jstNow());
+  return getFriendByLineUserId(db, userId);
 }
 
 /**
