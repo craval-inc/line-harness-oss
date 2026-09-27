@@ -252,7 +252,9 @@ function followSyncStatement(db: D1Database, lineUserId: string, nowJst: string)
  * follow 時の友だち登録/更新（upsertFriend 相当）と is_following・フォロー履歴の最新状態への同期を1つの batch で行う。
  * どちらかが失敗すれば両方ロールバック＝「friends=1 だが最新状態は unfollow」が残らない。
  * - 既存行: プロフィールだけ更新し is_following には触れない（状態遷移と履歴は同期文だけが決める）
- * - 新規行: is_following=0・first_followed_at=このフォローのイベント時刻で作り、同期文で 1 へ遷移させる
+ * - 新規行: 「このフォローを反映済み」（is_following=1・初回/開始/最終フォロー日時＝このイベント時刻）で作り、
+ *   その後の同期文で最新状態へ遷移させる。プロフィール取得中に新しい unfollow が完了していれば、
+ *   同期文が 1→0 として解除日時・解除回数を記録する（0 で作ると同期条件に当たらず解除履歴が残らない）
  * プロフィール取得は呼び出し側で batch の前に済ませる。
  */
 export async function upsertFriendAndSyncFollow(
@@ -264,8 +266,10 @@ export async function upsertFriendAndSyncFollow(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO friends (id, line_user_id, display_name, picture_url, status_message, is_following, first_followed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `INSERT INTO friends
+           (id, line_user_id, display_name, picture_url, status_message, is_following,
+            first_followed_at, current_follow_started_at, last_followed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
          ON CONFLICT(line_user_id) DO UPDATE SET
            display_name = excluded.display_name,
            picture_url = excluded.picture_url,
@@ -274,7 +278,8 @@ export async function upsertFriendAndSyncFollow(
       )
       .bind(
         crypto.randomUUID(), input.lineUserId, input.displayName, input.pictureUrl, input.statusMessage,
-        toJstFromEpoch(followEventTimestamp), nowJst, nowJst,
+        toJstFromEpoch(followEventTimestamp), toJstFromEpoch(followEventTimestamp), toJstFromEpoch(followEventTimestamp),
+        nowJst, nowJst,
       ),
     followSyncStatement(db, input.lineUserId, nowJst),
   ]);

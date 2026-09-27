@@ -661,6 +661,22 @@ describe('[v024-5] 受信箱経由でも本家 065 のフォロー履歴を同�
     expect(hist()).toMatchObject({ is_following: 1, first_followed_at: J(t1), current_follow_started_at: J(t3), last_followed_at: J(t3), last_unfollowed_at: J(t2), unfollow_count: 1 });
   }, 15_000);
 
+  test('初回 follow のプロフィール取得中に unfollow が完了 → 解除履歴（日時・回数1）が残る', async () => {
+    const t1 = Date.UTC(2026, 8, 1), t3 = Date.UTC(2026, 8, 3);
+    let injected = false;
+    lineMocks.getProfile.mockImplementation(async () => {
+      if (!injected) {
+        injected = true;
+        await post([unfollow(t3)]);
+      }
+      return { displayName: 'テスト太郎', userId: USER };
+    });
+    await post([follow(t1)]);
+    expect(hist()).toMatchObject({
+      is_following: 0, first_followed_at: J(t1), current_follow_started_at: null, last_unfollowed_at: J(t3), unfollow_count: 1,
+    });
+  }, 15_000);
+
   test('古い follow の遅延到着・同じ unfollow の再送では履歴も回数も変わらない', async () => {
     const t1 = Date.UTC(2026, 8, 1), t2 = Date.UTC(2026, 8, 5);
     await post([follow(t1)]);

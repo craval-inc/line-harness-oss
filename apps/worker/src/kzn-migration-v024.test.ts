@@ -11,7 +11,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SqliteD1 } from './test-utils/sqlite-d1.js';
 // @ts-expect-error — plain ESM script without types
-import { evaluateGate } from '../../../scripts/kzn-d1-gate.mjs';
+import { evaluateGate, wranglerCommand, COLUMNS_SQL } from '../../../scripts/kzn-d1-gate.mjs';
 
 // vitest は apps/worker を cwd として実行する
 const DB_PKG = join('..', '..', 'packages', 'db');
@@ -123,5 +123,17 @@ describe('kzn 本番 D1 の v0.24 適用手順', () => {
     const r2 = evaluateGate(remoteLikeSnapshot(partial), expected);
     expect(r2.ok).toBe(false);
     expect(r2.errors.join('\n')).toMatch(/missing table/);
+  });
+
+  test('ゲートの wrangler 起動はシェルを通さず SQL を1引数のまま渡す（Windows の cmd.exe 分割対策）', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { existsSync } = await import('node:fs');
+    const { file, args } = wranglerCommand(COLUMNS_SQL);
+    expect(file).toBe(process.execPath);
+    expect(existsSync(args[0])).toBe(true); // wrangler/bin/wrangler.js
+    const echoed = JSON.parse(
+      execFileSync(file, ['-e', 'console.log(JSON.stringify(process.argv.slice(1)))', ...args.slice(1)], { encoding: 'utf8' }),
+    ) as string[];
+    expect(echoed[echoed.length - 1]).toBe(COLUMNS_SQL);
   });
 });

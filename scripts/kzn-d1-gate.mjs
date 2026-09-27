@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * [Craval kzn] kzn 本番 D1 を v0.24 に上げた後、Worker をデプロイする前の検証ゲート。
  * 1つでも満たさなければ exit 1（デプロイに進まない）。問い合わせ自体の失敗も exit 1（fail-closed）。
@@ -8,6 +7,7 @@
  *   - 有効なマイル付与ルールが 0 件
  *   - available のマイル残高合計が 0（062/063 の移行由来付与が削除済み）
  *
+ * シバン行は置かない（vitest から import するため。autocrlf で CRLF になると vite がシバンを誤解釈する）
  * 使い方（apps/worker で・cf-bkobu 後）:
  *   node ../../scripts/kzn-d1-gate.mjs            # wrangler d1 execute --remote で本番を検査
  * テストからは evaluateGate(snapshot, expectedColumns) を直接使う。
@@ -64,12 +64,25 @@ function expectedColumnsFromRepo() {
   return db.prepare(COLUMNS_SQL).all();
 }
 
+/**
+ * wrangler を node で直接起動する（シェルを通さない）。Windows で npx(.cmd) を shell:true で呼ぶと
+ * cmd.exe が引数を引用せず連結し、SQL が複数引数に割れるため。引数配列はそのまま子プロセスに渡る。
+ */
+export function wranglerCommand(sql) {
+  const workerDir = join(repoRoot, 'apps', 'worker');
+  const req = createRequire(join(workerDir, 'package.json'));
+  const pkgPath = req.resolve('wrangler/package.json');
+  const bin = JSON.parse(readFileSync(pkgPath, 'utf8')).bin.wrangler;
+  return {
+    file: process.execPath,
+    args: [join(dirname(pkgPath), bin), 'd1', 'execute', 'line-harness-kzn', '--remote', '-c', 'wrangler.kzn.toml', '--json', '--command', sql],
+    cwd: workerDir,
+  };
+}
+
 function remoteQuery(sql) {
-  const out = execFileSync(
-    'npx',
-    ['wrangler', 'd1', 'execute', 'line-harness-kzn', '--remote', '-c', 'wrangler.kzn.toml', '--json', '--command', sql],
-    { cwd: join(repoRoot, 'apps', 'worker'), encoding: 'utf8', shell: process.platform === 'win32' },
-  );
+  const { file, args, cwd } = wranglerCommand(sql);
+  const out = execFileSync(file, args, { cwd, encoding: 'utf8' });
   const parsed = JSON.parse(out);
   const first = Array.isArray(parsed) ? parsed[0] : parsed;
   if (!first || first.success === false || !Array.isArray(first.results)) throw new Error(`unexpected D1 response: ${out.slice(0, 300)}`);
