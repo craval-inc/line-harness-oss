@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { LineClient } from '@line-crm/line-sdk';
+import { LineClient, setLineSendDisabled } from '@line-crm/line-sdk';
 import {
   getLineAccounts,
   getTrafficPoolBySlug,
@@ -74,6 +74,9 @@ import { profileRefresh } from './routes/profile-refresh.js';
 import { richMenuGroups } from './routes/rich-menu-groups.js';
 import adminVersion from './routes/admin-version.js';
 import adminUpdate from './routes/admin-update.js';
+import { webhookInboxAdmin } from './routes/webhook-inbox-admin.js';
+import { handleWebhookEvent, incomingImageBucket } from './routes/webhook.js';
+import { inboxEnabled, mirrorEnabled, runInboxMaintenance } from './services/webhook-inbox.js';
 
 export type Env = {
   Bindings: {
@@ -112,6 +115,13 @@ export type Env = {
     // 未設定時は '*' にフォールバックするが、本番では必ず設定する。
     // 複数origin指定する場合はカンマ区切り。例: "https://admin.example.com,https://liff.example.com"
     ADMIN_ORIGIN?: string;
+    // [Craval kzn] 以下は kzn（きずな）インスタンス用。全て未設定なら従来と同一挙動。
+    PUBLIC_PATHS_ALLOW?: string;    // 認証不要パスの許可リスト（カンマ区切り）。設定時、それ以外の非 /api パスは 404
+    INCOMING_IMAGE_STORE?: string;  // "0" で受信画像を R2 に保存しない
+    WEBHOOK_INBOX?: string;         // "1" で Webhook 受信箱（同期保存・重複排除・再処理）
+    LINE_SEND_DISABLED?: string;    // "1" で LINE メッセージ送信 API を全拒否
+    MIRROR_URL?: string;            // 受信イベントの転送先（WEBHOOK_INBOX 時のみ）
+    MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -188,6 +198,8 @@ app.route('/', messageTemplates);
 app.route('/', dedupPreview);
 app.route('/', profileRefresh);
 app.route('/', richMenuGroups);
+// [Craval kzn] 受信箱の状態確認・打ち切り行の再試行（WEBHOOK_INBOX=1 の時だけ有効・Bearer 必須）
+app.route('/', webhookInboxAdmin);
 
 // Phase 5 (upgrade flow) — public build metadata endpoint. Mounted under
 // /admin/ but intentionally unauthenticated: the dashboard fetches /admin/version
@@ -562,6 +574,9 @@ async function scheduled(
   env: Env['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
+  // [Craval kzn] LINE_SEND_DISABLED=1 なら Cron 経由の配信も含めて LINE 送信 API を拒否する。
+  setLineSendDisabled(env.LINE_SEND_DISABLED === '1');
+
   // Get all active accounts from DB
   const dbAccounts = await getLineAccounts(env.DB);
 
@@ -593,6 +608,39 @@ async function scheduled(
   jobs.push(refreshLineAccessTokens(env.DB));
 
   await Promise.allSettled(jobs);
+
+  // [Craval kzn] Webhook 受信箱: 未処理行の再処理・未転送行の再転送・保持期限切れの削除。
+  if (inboxEnabled(env)) {
+    try {
+      const accountTokens = new Map<string, string>();
+      for (const account of dbAccounts) {
+        if (account.is_active) accountTokens.set(account.id, account.channel_access_token);
+      }
+      const result = await runInboxMaintenance({
+        db: env.DB,
+        process: async (event, lineAccountId) => {
+          const token = (lineAccountId && accountTokens.get(lineAccountId)) || env.LINE_CHANNEL_ACCESS_TOKEN;
+          await handleWebhookEvent(
+            env.DB,
+            new LineClient(token),
+            event,
+            token,
+            lineAccountId,
+            env.WORKER_URL,
+            env.LIFF_URL,
+            incomingImageBucket(env),
+            { inbox: true },
+          );
+        },
+        mirror: mirrorEnabled(env) ? { url: env.MIRROR_URL!, secret: env.MIRROR_SECRET! } : null,
+      });
+      if (result.reprocessed + result.reprocessFailed + result.remirrored + result.remirrorFailed + result.purged > 0) {
+        console.log(`[webhook-inbox] ${JSON.stringify(result)}`);
+      }
+    } catch (e) {
+      console.error('webhook-inbox maintenance error:', e);
+    }
+  }
 
   // Fetch broadcast insights (runs daily, self-throttled)
   try {
@@ -666,7 +714,12 @@ async function scheduled(
 }
 
 export default {
-  fetch: app.fetch,
+  // [Craval kzn] LINE_SEND_DISABLED は isolate 内の全 LineClient に効かせるため、リクエスト毎に env から反映する。
+  // 未設定なら false＝従来と同一挙動。
+  fetch: (request: Request, env: Env['Bindings'], ctx: ExecutionContext) => {
+    setLineSendDisabled(env?.LINE_SEND_DISABLED === '1');
+    return app.fetch(request, env, ctx);
+  },
   scheduled,
 };
 // redeploy trigger

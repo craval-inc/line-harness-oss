@@ -1,0 +1,63 @@
+name = "line-harness-kzn"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+# nodejs_compat is required by @line-harness/update-engine (node:stream/zlib/crypto + tar-stream).
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# ═══════════════════════════════════════════════════════════════
+# きずな証人代行（kzn）用テナント — bkobu アカウント（bkobu.yd@gmail.com）
+# Account: 01547b03881149dd0db10da0da6928c8
+# 設計: C:\dev\kizuna-shonin\docs\line-harness-kzn-design.md
+#
+# デプロイ（必ずこの順）:
+#   node ../../scripts/check-kzn-target.mjs          # 取り違え防止の事前検査（失敗なら中止）
+#   pnpm --filter @line-crm/line-sdk build            # 送信禁止ガード入りの dist を作る
+#   npx wrangler deploy -c wrangler.kzn.toml          # 要 bkobu の CF トークン
+#
+# ※ sbo(セールスキャスト本番) の wrangler.toml・fzk の wrangler.fzk.toml とは完全分離。触れない。
+# ※ 管理画面・LIFF を配信しないので [assets] は置かない（notFound は JSON 404）。
+# ※ 受信画像を保存しないので R2(IMAGES) はバインドしない（INCOMING_IMAGE_STORE="0"）。
+# ═══════════════════════════════════════════════════════════════
+account_id = "01547b03881149dd0db10da0da6928c8"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "line-harness-kzn"
+database_id = "TBD_KZN_D1_ID"
+
+[triggers]
+crons = ["*/5 * * * *", "0 */6 * * *"]
+
+# ═══════════════════════════════════════════════════════════════
+# 環境変数 (Secrets は `wrangler secret put <NAME> -c wrangler.kzn.toml` で設定)
+# ═══════════════════════════════════════════════════════════════
+[vars]
+WORKER_NAME = "line-harness-kzn"
+ADMIN_PAGES_PROJECT = ""
+LIFF_PAGES_PROJECT = ""
+D1_DATABASE_ID = "TBD_KZN_D1_ID"
+# 本家からの自動アップデートは無効（M-2・セキュリティ方針）。
+MANIFEST_URL = ""
+WORKER_PUBLIC_URL = "https://line-harness-kzn.bkobu-yd.workers.dev"
+ADMIN_PUBLIC_URL = ""
+LIFF_PUBLIC_URL = ""
+LIFF_URL = ""
+CF_ACCOUNT_ID = "01547b03881149dd0db10da0da6928c8"
+
+# [Craval kzn] Phase 1 の安全設定（設計書 §4 / §5-1）
+PUBLIC_PATHS_ALLOW = "/webhook"
+INCOMING_IMAGE_STORE = "0"
+WEBHOOK_INBOX = "1"
+LINE_SEND_DISABLED = "1"
+MIRROR_URL = "https://anami-pat.jp/api/line-harness-event"
+
+# Secrets (要 `wrangler secret put ... -c wrangler.kzn.toml`・値は Bitwarden `line-harness-kzn`):
+#   LINE_CHANNEL_SECRET            # きずなの Channel secret
+#   LINE_CHANNEL_ACCESS_TOKEN      # きずなの Long-lived token
+#   LINE_CHANNEL_ID                # きずな Messaging API Channel ID = 2009123769
+#   API_KEY                        # 管理 API 用 Bearer（32byte hex）
+#   ADMIN_API_KEY                  # /admin/update/* 用（PUBLIC_PATHS_ALLOW で閉じているが念のため設定）
+#   WORKER_URL                     # https://line-harness-kzn.bkobu-yd.workers.dev
+#   MIRROR_SECRET                  # きずな Pages の LINE_HARNESS_MIRROR_SECRET と同値
+# 設定しない: LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET / STRIPE_* / CF_API_TOKEN / ADMIN_ORIGIN

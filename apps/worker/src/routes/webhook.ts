@@ -21,6 +21,19 @@ import {
 } from '@line-crm/db';
 import type { EntryRoute } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
+import {
+  inboxEnabled,
+  mirrorEnabled,
+  saveInboxEvents,
+  processInboxEvent,
+  mirrorInboxRow,
+  webhookEventIdOf,
+  isUnsent,
+  claimFollowState,
+  recordFollowState,
+  applyUnfollowIfNewer,
+  UNSENT_PLACEHOLDER,
+} from '../services/webhook-inbox.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
@@ -132,12 +145,57 @@ webhook.post('/webhook', async (c) => {
   }
 
   const lineClient = new LineClient(channelAccessToken);
+  const workerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
+  // [Craval kzn] INCOMING_IMAGE_STORE=0 の環境では受信画像を R2 に保存しない（未設定なら従来どおり IMAGES）。
+  const r2 = incomingImageBucket(c.env);
+
+  // [Craval kzn] WEBHOOK_INBOX=1: 生イベントを同期保存してから 200。保存失敗は 500（LINE 再送対象）。
+  if (inboxEnabled(c.env)) {
+    let saved: Awaited<ReturnType<typeof saveInboxEvents>>;
+    try {
+      saved = await saveInboxEvents(db, body.events ?? [], {
+        lineAccountId: matchedAccountId,
+        mirror: mirrorEnabled(c.env),
+        now: Date.now(),
+      });
+    } catch (err) {
+      console.error('[webhook-inbox] save failed:', err instanceof Error ? err.message : err);
+      return c.json({ status: 'inbox_unavailable' }, 500);
+    }
+
+    const process = (event: WebhookEvent) =>
+      handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2, { inbox: true });
+
+    const inboxPromise = (async () => {
+      for (const event of saved.fresh) {
+        await processInboxEvent(db, event, matchedAccountId, (e) => process(e));
+        if (mirrorEnabled(c.env)) {
+          const row = await db
+            .prepare('SELECT webhook_event_id, body_json, mirrored FROM webhook_inbox WHERE webhook_event_id = ?')
+            .bind(webhookEventIdOf(event))
+            .first<{ webhook_event_id: string; body_json: string; mirrored: number }>();
+          if (row && row.mirrored === 0) {
+            await mirrorInboxRow({ db, url: c.env.MIRROR_URL!, secret: c.env.MIRROR_SECRET! }, row);
+          }
+        }
+      }
+      for (const event of saved.untracked) {
+        try {
+          await process(event);
+        } catch (err) {
+          console.error('Error handling webhook event:', err);
+        }
+      }
+    })();
+    c.executionCtx.waitUntil(inboxPromise);
+    return c.json({ status: 'ok' }, 200);
+  }
 
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, c.env.IMAGES);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, workerUrl, c.env.LIFF_URL, r2);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -149,6 +207,32 @@ webhook.post('/webhook', async (c) => {
   return c.json({ status: 'ok' }, 200);
 });
 
+/** [Craval kzn] INCOMING_IMAGE_STORE=0 なら undefined（画像はラベル記録のみ）。未設定なら従来どおり IMAGES。 */
+export function incomingImageBucket(env: { INCOMING_IMAGE_STORE?: string; IMAGES?: R2Bucket }): R2Bucket | undefined {
+  if (env.INCOMING_IMAGE_STORE === '0') return undefined;
+  return env.IMAGES;
+}
+
+export interface HandleEventOptions {
+  /** [Craval kzn] WEBHOOK_INBOX 経由の処理。重複挿入防止・送信取消・follow 時刻条件を有効にする。 */
+  inbox?: boolean;
+}
+
+/** Cron の受信箱再処理から呼ぶための公開エントリ（handleEvent と同一）。 */
+export async function handleWebhookEvent(
+  db: D1Database,
+  lineClient: LineClient,
+  event: WebhookEvent,
+  lineAccessToken: string,
+  lineAccountId: string | null,
+  workerUrl: string | undefined,
+  liffUrl: string | undefined,
+  r2: R2Bucket | undefined,
+  options: HandleEventOptions,
+): Promise<void> {
+  return handleEvent(db, lineClient, event, lineAccessToken, lineAccountId, workerUrl, liffUrl, r2, options);
+}
+
 async function handleEvent(
   db: D1Database,
   lineClient: LineClient,
@@ -158,11 +242,24 @@ async function handleEvent(
   workerUrl?: string,
   liffUrl?: string,
   r2?: R2Bucket,
+  options: HandleEventOptions = {},
 ): Promise<void> {
+  const inbox = options.inbox === true;
+  const eventTimestamp = (event as { timestamp?: number }).timestamp;
   if (event.type === 'follow') {
     const userId =
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
+
+    // [Craval kzn] より新しい follow/unfollow が反映済みなら、古い follow で状態を巻き戻さない。
+    let followClaim: 'claimed' | 'stale' | 'no_friend' | null = null;
+    if (inbox && typeof eventTimestamp === 'number') {
+      followClaim = await claimFollowState(db, userId, eventTimestamp);
+      if (followClaim === 'stale') {
+        console.log('[follow] skipped stale follow event (newer state already applied)');
+        return;
+      }
+    }
 
     // [Craval security M-5] userId(=PII)をhash prefix化してログ出力
     const userIdHash = await hashPIIPrefix(userId);
@@ -186,6 +283,9 @@ async function handleEvent(
       pictureUrl: profile?.pictureUrl ?? null,
       statusMessage: profile?.statusMessage ?? null,
     });
+    if (followClaim === 'no_friend' && typeof eventTimestamp === 'number') {
+      await recordFollowState(db, userId, eventTimestamp);
+    }
 
     console.log(`[follow] friend.id=${friend.id} friend.line_account_id=${(friend as any).line_account_id}`);
 
@@ -348,6 +448,11 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
+    // [Craval kzn] 受信箱経由はイベント時刻で条件付き更新（古い unfollow で新しい follow を巻き戻さない）。
+    if (inbox && typeof eventTimestamp === 'number') {
+      await applyUnfollowIfNewer(db, userId, eventTimestamp, jstNow());
+      return;
+    }
     await updateFriendFollowStatus(db, userId, false);
     return;
   }
@@ -451,11 +556,13 @@ async function handleEvent(
       location: msg.title ? `[位置情報: ${msg.title}]` : '[位置情報]',
     };
     const content = labels[msg.type] ?? `[${msg.type}]`;
+    // [Craval kzn] 送信取消済みなら本文（ラベル・画像）を保存しない。
+    const unsentAlready = inbox && (await isUnsent(db, msg.id));
 
     // image の場合は LINE Content API でバイナリを取得 → R2 → JSON URL に置換。
     // 失敗時は labels[msg.type] のラベル文字列のまま (フォールバック)。
-    let finalContent = content;
-    if (msg.type === 'image' && r2 && workerUrl) {
+    let finalContent = unsentAlready ? UNSENT_PLACEHOLDER : content;
+    if (msg.type === 'image' && r2 && workerUrl && !unsentAlready) {
       const lineMessageId = msg.id;
       const { fetchAndStoreIncomingImage } = await import('../services/incoming-image.js');
       const refs = await fetchAndStoreIncomingImage({
@@ -470,6 +577,17 @@ async function handleEvent(
       }
     }
 
+    if (inbox) {
+      // [Craval kzn] line_message_id の部分一意インデックスで重複挿入を防ぐ。
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_message_id, created_at)
+           VALUES (?, ?, 'incoming', ?, ?, NULL, NULL, 'user', ?, ?)`,
+        )
+        .bind(crypto.randomUUID(), friend.id, msg.type, finalContent, msg.id, jstNow())
+        .run();
+      return;
+    }
     await db
       .prepare(
         `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, created_at)
@@ -489,18 +607,33 @@ async function handleEvent(
     const friend = await getFriendByLineUserId(db, userId);
     if (!friend) return;
 
-    const incomingText = textMessage.text;
     const now = jstNow();
     const logId = crypto.randomUUID();
+    // [Craval kzn] 送信取消済みなら本文を保存しない（取消が先着したケース）。
+    const unsentAlready = inbox && (await isUnsent(db, textMessage.id));
+    const incomingText = unsentAlready ? UNSENT_PLACEHOLDER : textMessage.text;
 
     // 受信メッセージをログに記録
-    await db
-      .prepare(
-        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, created_at)
-         VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'user', ?)`,
-      )
-      .bind(logId, friend.id, incomingText, now)
-      .run();
+    if (inbox) {
+      // [Craval kzn] 同一 LINE message の再処理では挿入せず、以降の副作用（応答・イベント発火）も行わない。
+      const inserted = await db
+        .prepare(
+          `INSERT OR IGNORE INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, line_message_id, created_at)
+           VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'user', ?, ?)`,
+        )
+        .bind(logId, friend.id, incomingText, textMessage.id, now)
+        .run();
+      if ((inserted.meta?.changes ?? 0) === 0) return;
+      if (unsentAlready) return;
+    } else {
+      await db
+        .prepare(
+          `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, source, created_at)
+           VALUES (?, ?, 'incoming', 'text', ?, NULL, NULL, 'user', ?)`,
+        )
+        .bind(logId, friend.id, incomingText, now)
+        .run();
+    }
 
     // Cross-account trigger: send message from another account via UUID
     if (incomingText === '体験を完了する' && lineAccountId) {
