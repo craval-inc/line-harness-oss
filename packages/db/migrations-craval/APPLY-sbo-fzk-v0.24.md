@@ -30,7 +30,7 @@ kzn（きずな）で実施済みの手順（`migrations-kzn/APPLY-v0.24.md`）�
 1. **マイル機能（本家 v0.24 の新機能）を使うか** — 既定の手順は「止める」（`craval-post-v024-mileage-off.sql` を当てる）。
    - 止めないと、LINE で「マイル」と送った友だちに本家の残高案内 Flex が自動返信され、友だち追加・タグ等でポイントが付き始める。セールスキャスト（営業 BPO の応募・問い合わせ）・フゾカテ（家庭教師）に対応するポイント制度は無いので、止める推奨。
    - 使う場合は `--keep-mileage` で実行（本家既定のまま）。
-2. **実施タイミング** — sbo はセールスキャスト再始動中（2026-09-28）。友だち 1・受信 0 なので影響は小さいが、LINE 集客を始める前にやるのが最も安全。メンテ中（最大 15 分目標）は Worker 全体が 503（受信・管理画面・LIFF・公開フォームすべて）になり、LINE の受信は LINE の再送に頼る。**「Webhookの再送」ON が実施の必須条件**（LINE Developers で加藤さんが確認・ON にする）。ON でも LINE は到達を保証しないので、取りこぼしゼロが必須なら実施しない判断もあり得る（sbo/fzk は受信実績ほぼ 0 なので実害は小さい）。
+2. **実施タイミング** — sbo はセールスキャスト再始動中（2026-09-28）。友だち 1・受信 0 なので影響は小さいが、LINE 集客を始める前にやるのが最も安全。メンテ中（約 20 分＝旧版の実行が上限15分で終わるのを待つため）は Worker 全体が 503（受信・管理画面・LIFF・公開フォームすべて）になり、LINE の受信は LINE の再送に頼る。**「Webhookの再送」ON が実施の必須条件**（LINE Developers で加藤さんが確認・ON にする）。ON でも LINE は到達を保証しないので、取りこぼしゼロが必須なら実施しない判断もあり得る（sbo/fzk は受信実績ほぼ 0 なので実害は小さい）。
 3. **管理画面の Safari 対応** — 本家 v0.24 の管理画面は httpOnly Cookie 認証。`*.pages.dev`（管理画面）と `*.workers.dev`（Worker）が別サイトのため `ADMIN_ALLOW_CROSS_SITE=true` が必要で、**Chrome のみ**（Safari 不可）。Safari でも使うならカスタムドメインで同一サイトにする（DNS 権限が要る）。
 
 ## 4. 手順（テナントごと。sbo→fzk の順でも逆でもよい。1 テナント 15〜20 分）
@@ -61,12 +61,12 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
      LT=<Bitwarden のチャネルアクセストークン>   # sbo=line-harness-sbo-api-key 等・値は表示しない
      whtest() { curl -s -X POST -H "Authorization: Bearer $LT" -H 'Content-Type: application/json' -d '{}' https://api.line.me/v2/bot/channel/webhook/test | python -c "import sys,json;d=json.load(sys.stdin);print(d);sys.exit(0 if d.get('statusCode')==int(sys.argv[1]) else 1)" "$1"; }
      ```
-1. **メンテナンスで新 Worker をデプロイ**（ここから時計・15 分目標）
-   `npx wrangler deploy -c wrangler.$T.toml --var WEBHOOK_MAINTENANCE:1`
+1. **メンテナンスで新 Worker をデプロイ**（ここから時計・メンテ窓は約 20 分）
+   `npx wrangler deploy -c wrangler.$T.toml --var WEBHOOK_MAINTENANCE:1 && export MAINT_STARTED=$(date +%s)`
    確認: `whtest 503`（`success=false`・`statusCode=503`）。管理画面・LIFF も 503 になる（本手順の Worker は `WEBHOOK_MAINTENANCE=1` で /webhook 以外を全て 503 にする＝移行中の書き込みを作らない）。
 2. **退避・③migration・④後処理・⑤検証ゲート** — 一括スクリプト（最初の失敗で全体停止）
    `bash ../../scripts/craval-apply-v024.sh $T`（マイルを使う判断なら `--keep-mileage`）
-   内容: 未適用確認 → **静止確認**（メンテ前から動いていた処理の書き込みが止むまで 60 秒おきに確認・最大 15 分）→ bookmark＋export → 事前件数 → 本家 046〜072 → マイル停止 → 事後件数一致（chats は重複統合分だけ減ってよい）→ `craval-d1-gate.mjs`。
+   内容: 未適用確認 → **メンテ開始から 16 分待つ**（メンテ前に始まった旧版の実行は Cloudflare の上限で最長15分＝それ以降に退避すれば restore で消える書き込みが無い）→ 静止確認（念のため）→ bookmark＋export → 事前件数 → 本家 046〜072 → マイル停止 → 事後件数一致（chats は重複統合分だけ減ってよい）→ `craval-d1-gate.mjs`。
 3. **メンテ解除で新 Worker をデプロイ**
    `npx wrangler deploy -c wrangler.$T.toml` → `whtest 200`（`success=true`・`statusCode=200`）。
 4. **管理画面を v0.24 で作り直す**（旧画面は localStorage 認証なので新 Worker ではログインできない）
@@ -94,4 +94,4 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
 
 ## 6. 所要時間（見込み）
 
-1 テナント: 準備（ビルド）10 分・メンテ窓 5〜10 分（kzn 実績 3分30秒）・管理画面/LIFF 10 分・確認 5 分 ＝ 約 30 分。2 テナントで約 1 時間。
+1 テナント: 準備（ビルド・旧版 dry-run）15 分・メンテ窓 約 20 分（16 分待機＋適用数分）・管理画面/LIFF 10 分・確認 5 分 ＝ 約 50 分。2 テナントは準備を並行すれば約 1.5 時間。

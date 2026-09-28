@@ -5,6 +5,7 @@
 #
 # 前提（このスクリプトの外で済ませる）:
 #   ① 新 Worker(craval-v0.24) を --var WEBHOOK_MAINTENANCE:1 でデプロイ済み（受信は 503・定期処理停止）
+#      直後に export MAINT_STARTED=$(date +%s)（旧版の実行が上限15分で終わるまで退避を待つため）
 # 使い方: cd apps/worker && cf-craval && bash ../../scripts/craval-apply-v024.sh <sbo|fzk> [--keep-mileage]
 set -euo pipefail
 
@@ -37,7 +38,15 @@ if d1 --json --command "SELECT name FROM sqlite_master WHERE type='table' AND na
   echo "NG: 046 以降が既に適用済み（affiliate_links / mileage_rules が存在）。手順書の「途中から再開」を参照"; exit 1
 fi
 
-step "①' 静止確認（メンテ前から動いていた API・Cron・waitUntil の書き込みが止んだことを確認してから退避）"
+step "①' 旧版の実行が終わるまで待つ（Cloudflare の上限: Cron は最長15分・waitUntil は応答後30秒）"
+# メンテ用デプロイ直後に MAINT_STARTED=$(date +%s) を export しておく（手順書 1.）。デプロイ前に始まった実行は
+# 最長でも15分で終わるので、デプロイから15分（+1分の余裕）経つまで退避しない＝restore で消える書き込みを作らない。
+[ -n "${MAINT_STARTED:-}" ] || { echo "NG: MAINT_STARTED が未設定（メンテ用デプロイ直後に export MAINT_STARTED=\$(date +%s)）"; exit 1; }
+MIN_WAIT=${MIN_WAIT_SEC:-960}
+elapsed=$(( $(date +%s) - MAINT_STARTED ))
+if [ "$elapsed" -lt "$MIN_WAIT" ]; then echo "  メンテ開始から ${elapsed}s。あと $((MIN_WAIT - elapsed))s 待つ"; sleep $((MIN_WAIT - elapsed)); fi
+
+step "①' 静止確認（念のため・書き込み指標が 60 秒おき3回一致）"
 # Worker の実行は最大でも数分で終わる。書き込み指標（主要テーブルの件数と最新時刻）が 60 秒おき 3 回連続で同じになるまで待つ。
 QUIET_SQL="SELECT (SELECT COUNT(*) FROM friends)||'/'||(SELECT COUNT(*) FROM messages_log)||'/'||(SELECT COUNT(*) FROM chats)||'/'||(SELECT COUNT(*) FROM friend_scenarios)||'/'||(SELECT COUNT(*) FROM account_health_logs)||'/'||COALESCE((SELECT MAX(created_at) FROM account_health_logs),'')||'/'||COALESCE((SELECT MAX(created_at) FROM messages_log),'')||'/'||COALESCE((SELECT MAX(updated_at) FROM friends),'') AS sig"
 prev=""; same=0
