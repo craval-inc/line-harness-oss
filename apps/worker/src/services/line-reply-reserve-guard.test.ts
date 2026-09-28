@@ -61,6 +61,23 @@ describe('consumeReplyReserveBudget', () => {
     expect(fn.mock.calls.filter((c) => String(c[0]).includes('/quota')).length).toBe(2);
   });
 
+  test('同時に来た送信は同じ残数を共有する: 残り51・予約50で同時2通 → 片方だけ通る', async () => {
+    stubLine(200, 149);
+    setLineReplyReserve(50);
+    const client = new LineClient('t-concurrent');
+    const results = await Promise.allSettled([consumeReplyReserveBudget(client, 1), consumeReplyReserveBudget(client, 1)]);
+    expect(results.filter((r) => r.status === 'fulfilled').length).toBe(1);
+    expect(results.filter((r) => r.status === 'rejected').length).toBe(1);
+  });
+
+  test('アカウント（トークン）ごとに別の残数（別アカウントの残数で止めない）', async () => {
+    setLineReplyReserve(50);
+    stubLine(200, 150); // A は残り50＝予約ちょうど
+    await expect(consumeReplyReserveBudget(new LineClient('t-acct-A'), 1)).rejects.toBeInstanceOf(LinePlanQuotaError);
+    stubLine(200, 0); // B は残り200
+    await expect(consumeReplyReserveBudget(new LineClient('t-acct-B'), 1)).resolves.toBeUndefined();
+  });
+
   test('予約0（未設定）は何もしない（API も呼ばない）', async () => {
     const fn = stubLine(200, 200);
     await consumeReplyReserveBudget(new LineClient('t-zero'), 5);

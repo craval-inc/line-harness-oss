@@ -459,11 +459,24 @@ export async function notifyQuotaAlert(
  * スナップショットの残りを宛先数だけ減らす＝1回の Cron で何通送っても予約枠を割らない（キャッシュが切れたら API で読み直す）。
  * 予約0・上限なしプラン・確認 API の失敗は何もしない（fail-open＝本家と同じく送信を止めない）。
  */
+const reserveSnapshotInflight = new Map<string, Promise<PlanQuotaSnapshot | null>>();
+/** アカウント（チャネルトークン）ごとのキャッシュキー。別アカウントの残数で誤って止めない。 */
+function reserveCacheKey(client: PlanQuotaClient): string {
+  const token = (client as unknown as { channelAccessToken?: unknown }).channelAccessToken;
+  return `craval-reply-reserve:${typeof token === 'string' ? token : 'default'}`;
+}
 export async function consumeReplyReserveBudget(client: PlanQuotaClient, recipients: number): Promise<void> {
   if (lineReplyReserve <= 0 || recipients <= 0) return;
   let snapshot: PlanQuotaSnapshot | null;
+  const key = reserveCacheKey(client);
   try {
-    snapshot = await readPlanQuotaSnapshot(client, 'craval-reply-reserve');
+    // 同時に来た送信は同じスナップショットを共有する（キャッシュ未作成時に各自が読むと、同じ残数で両方通ってしまう）
+    let pending = reserveSnapshotInflight.get(key);
+    if (!pending) {
+      pending = readPlanQuotaSnapshot(client, key).finally(() => reserveSnapshotInflight.delete(key));
+      reserveSnapshotInflight.set(key, pending);
+    }
+    snapshot = await pending;
   } catch (err) {
     console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
     return;
@@ -485,7 +498,7 @@ export async function replyReserveExhausted(client: PlanQuotaClient): Promise<bo
   if (lineReplyReserve <= 0) return false;
   let snapshot: PlanQuotaSnapshot | null;
   try {
-    snapshot = await readPlanQuotaSnapshot(client, 'craval-reply-reserve');
+    snapshot = await readPlanQuotaSnapshot(client, reserveCacheKey(client));
   } catch (err) {
     console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
     return false;

@@ -38,6 +38,8 @@ const quotaAlertMocks = vi.hoisted(() => ({
   readPlanQuotaSnapshot: vi.fn(),
   // [Craval kzn] 返信予約枠（既定0＝本家と同一＝1:1 push はプランクォータのチェック対象外）
   getLineReplyReserve: vi.fn(() => 0),
+  consumeReplyReserveBudget: vi.fn(async (_client: unknown, _recipients: number) => {}),
+  LinePlanQuotaError: class LinePlanQuotaError extends Error {},
   LINE_MONTHLY_LIMIT_MESSAGE: 'You have reached your monthly limit.',
 }));
 
@@ -1215,13 +1217,24 @@ describe('LINE plan quota guard (proxy bulk sends)', () => {
 });
 
 describe('[Craval kzn] 返信予約枠がある環境の 1:1 push', () => {
-  test('予約あり: プロキシ経由の 1:1 push もプランクォータ（予約込み）の確認を通る', async () => {
+  test('予約あり: 自動の 1:1 push は予約枠を差し引き、割るなら 429（上流へ転送しない）', async () => {
     quotaAlertMocks.getLineReplyReserve.mockReturnValueOnce(50);
-    quotaAlertMocks.getLinePlanQuotaShortfall.mockResolvedValueOnce({ limit: 200, consumption: 150, remaining: 50, audience: 1, reserved: 50 });
+    quotaAlertMocks.consumeReplyReserveBudget.mockRejectedValueOnce(new quotaAlertMocks.LinePlanQuotaError('reserve'));
     const { db } = fakeDb();
     const res = await setupApp().request(pushRequest('acc-token'), {}, env(db));
     expect(res.status).toBe(429);
-    expect(quotaAlertMocks.getLinePlanQuotaShortfall).toHaveBeenCalledTimes(1);
-    expect(quotaAlertMocks.getLinePlanQuotaShortfall.mock.calls[0][1]).toBe(1);
+    expect(quotaAlertMocks.consumeReplyReserveBudget).toHaveBeenCalledTimes(1);
+    expect(quotaAlertMocks.consumeReplyReserveBudget.mock.calls[0][1]).toBe(1);
+  });
+
+  test('人の 1:1 返信（X-Line-Harness-Source: manual）は予約枠の対象外（予約枠を使ってよい側）', async () => {
+    quotaAlertMocks.getLineReplyReserve.mockReturnValue(50);
+    try {
+      const { db } = fakeDb();
+      await setupApp().request(pushRequest('acc-token', undefined, { 'X-Line-Harness-Source': 'manual' }), {}, env(db));
+      expect(quotaAlertMocks.consumeReplyReserveBudget).not.toHaveBeenCalled();
+    } finally {
+      quotaAlertMocks.getLineReplyReserve.mockReturnValue(0);
+    }
   });
 });

@@ -30,6 +30,8 @@ import {
   readPlanQuotaSnapshot,
   type PlanQuotaShortfall,
   getLineReplyReserve,
+  consumeReplyReserveBudget,
+  LinePlanQuotaError,
 } from '../services/quota-alert.js';
 
 /**
@@ -824,10 +826,17 @@ function proxyHandler(prefix: string, upstreamBase: string, logSends: boolean) {
       const blocked = await guardLinePlanQuota(c, caller, bulkAudience);
       if (blocked) return blocked;
     }
-    // [Craval kzn] 返信予約枠がある環境では、プロキシ経由の 1:1 push も予約枠を割らせない（相談リマインダー等）。
-    if (isMessageSend && path === '/v2/bot/message/push' && getLineReplyReserve() > 0) {
-      const blocked = await guardLinePlanQuota(c, caller, 1);
-      if (blocked) return blocked;
+    // [Craval kzn] 返信予約枠がある環境では、プロキシ経由の自動の 1:1 push（相談リマインダー等）も予約枠を割らせない。
+    //   人の 1:1 返信（X-Line-Harness-Source: manual）は予約枠を使ってよい側なので対象外。通ったら残数を差し引く。
+    if (isMessageSend && path === '/v2/bot/message/push' && getLineReplyReserve() > 0 && logSource !== 'manual') {
+      try {
+        await consumeReplyReserveBudget(new LineClient(caller.upstreamToken), 1);
+      } catch (err) {
+        if (err instanceof LinePlanQuotaError) {
+          return c.json({ message: LINE_MONTHLY_LIMIT_MESSAGE, source: LIMIT_SOURCE, reason: 'line-reply-reserve' }, 429);
+        }
+        throw err;
+      }
     }
 
     const headers: Record<string, string> = {
