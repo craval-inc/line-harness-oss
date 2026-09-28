@@ -504,6 +504,8 @@ export interface MirrorPayload {
   mediaSize?: number;
   mediaReason?: string;
   mediaFileName?: string;
+  /** 計画 E4: LINE の既読 API（chat/markAsRead）用トークン。取消済み・メッセージ以外では載せない。 */
+  markAsReadToken?: string;
 }
 
 const NON_TEXT_LABELS: Record<string, string> = {
@@ -536,6 +538,9 @@ export function buildMirrorPayload(
     if (opts.unsent) payload.text = UNSENT_PLACEHOLDER;
     else if (msg.type === 'text') payload.text = msg.text ?? '';
     else payload.text = NON_TEXT_LABELS[msg.type] ?? `[${msg.type}]`;
+    // 計画 E4: 既読トークン（期限なし・そのメッセージ以前を既読にする）。取消済みは載せない（既読に使わせない）。
+    const token = (msg as { markAsReadToken?: unknown }).markAsReadToken;
+    if (!opts.unsent && typeof token === 'string' && token.length > 0 && token.length <= 512) payload.markAsReadToken = token;
   }
   if (opts.displayName) payload.displayName = opts.displayName;
   // 取消済みはメディア情報を載せない（本文と同じく伏せる）。
