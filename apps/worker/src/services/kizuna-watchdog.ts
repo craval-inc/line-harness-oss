@@ -65,34 +65,38 @@ export async function runKizunaWatchdog(opts: {
   if (!watchdogEnabled(env)) return null;
   const fetchFn = opts.fetchFn ?? fetch;
   const { healthy, detail } = await checkHeartbeat(env.KIZUNA_HEARTBEAT_URL!, env.KIZUNA_HEARTBEAT_TOKEN!, nowMs, fetchFn);
-  const state = (await db.prepare('SELECT alerting, last_alert_at FROM craval_watchdog WHERE name=?').bind(WATCHDOG_NAME).first<State>())
-    ?? { alerting: 0, last_alert_at: null };
-  const touch = (alerting: number, lastAlertAt: number | null) =>
-    db.prepare(
-      'INSERT INTO craval_watchdog (name, alerting, last_alert_at, last_checked_at, last_detail) VALUES (?,?,?,?,?) ' +
-        'ON CONFLICT(name) DO UPDATE SET alerting=excluded.alerting, last_alert_at=excluded.last_alert_at, last_checked_at=excluded.last_checked_at, last_detail=excluded.last_detail',
-    ).bind(WATCHDOG_NAME, alerting, lastAlertAt, nowMs, detail).run();
+  await db.prepare('INSERT INTO craval_watchdog (name, alerting) VALUES (?, 0) ON CONFLICT DO NOTHING').bind(WATCHDOG_NAME).run();
+  await db.prepare('UPDATE craval_watchdog SET last_checked_at=?, last_detail=? WHERE name=?').bind(nowMs, detail, WATCHDOG_NAME).run();
+  const state = await db.prepare('SELECT alerting, last_alert_at FROM craval_watchdog WHERE name=?').bind(WATCHDOG_NAME).first<State>();
+  const prevAlerting = Number(state?.alerting ?? 0);
+  const prevAlertAt = state?.last_alert_at == null ? null : Number(state.last_alert_at);
 
   if (healthy) {
-    if (Number(state.alerting) === 1) {
-      const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, `【きずな】通知 cron が復旧しました（${detail}）。`, fetchFn);
-      if (!ok) { await touch(1, state.last_alert_at); return 'chat_failed'; }
-      await touch(0, state.last_alert_at);
-      return 'recovered';
+    if (prevAlerting !== 1) return 'healthy';
+    // 復旧通知の送信権を条件付き UPDATE で1つだけ取る（並行 tick でも1回）。
+    const claim = await db.prepare('UPDATE craval_watchdog SET alerting=0 WHERE name=? AND alerting=1').bind(WATCHDOG_NAME).run();
+    if ((claim.meta?.changes ?? 0) !== 1) return 'healthy';
+    const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, `【きずな】通知 cron が復旧しました（${detail}）。`, fetchFn);
+    if (!ok) {
+      await db.prepare('UPDATE craval_watchdog SET alerting=1 WHERE name=? AND alerting=0').bind(WATCHDOG_NAME).run();
+      return 'chat_failed';
     }
-    await touch(0, state.last_alert_at);
-    return 'healthy';
+    return 'recovered';
   }
-  const last = state.last_alert_at == null ? null : Number(state.last_alert_at);
-  if (Number(state.alerting) === 1 && last != null && nowMs - last < REALERT_AFTER_MS) {
-    await touch(1, last);
-    return 'suppressed';
-  }
+  // 停止通知の送信権を条件付き UPDATE で1つだけ取る（未通知、または前回から1時間以上）。
+  const claim = await db.prepare(
+    'UPDATE craval_watchdog SET alerting=1, last_alert_at=? WHERE name=? AND (alerting=0 OR last_alert_at IS NULL OR last_alert_at <= ?)',
+  ).bind(nowMs, WATCHDOG_NAME, nowMs - REALERT_AFTER_MS).run();
+  if ((claim.meta?.changes ?? 0) !== 1) return 'suppressed';
   const text =
     `【きずな】通知 cron が止まっている可能性があります（${detail}）。\n` +
     `新着通知・返信期限の通知・日次ヘルスメールが届きません。Cloudflare の kizuna-notify-cron と anami-pat.jp を確認してください。`;
   const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, text, fetchFn);
-  if (!ok) { await touch(Number(state.alerting), last); return 'chat_failed'; }
-  await touch(1, nowMs);
+  if (!ok) {
+    // 送れなかった＝通知済みにしない（次の tick で再試行）。取った送信権だけを元に戻す。
+    await db.prepare('UPDATE craval_watchdog SET alerting=?, last_alert_at=? WHERE name=? AND last_alert_at=?')
+      .bind(prevAlerting, prevAlertAt, WATCHDOG_NAME, nowMs).run();
+    return 'chat_failed';
+  }
   return 'alerted';
 }

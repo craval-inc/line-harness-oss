@@ -76,4 +76,16 @@ describe('kizuna watchdog', () => {
     const good = stub({ lastOkAt: T0 - STALE_AFTER_MS - 60_000 });
     expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 5 * 60_000, fetchFn: good.fetchFn })).toBe('alerted');
   });
+
+  test('並行 tick でも停止通知は1通・復旧通知も1通', async () => {
+    const db = createKznTestDb() as unknown as D1Database;
+    const stale = stub({ lastOkAt: T0 - STALE_AFTER_MS - 60_000 });
+    const rs = await Promise.all([1, 2, 3].map(() => runKizunaWatchdog({ db, env: ENV, nowMs: T0, fetchFn: stale.fetchFn })));
+    expect(rs.filter((r) => r === 'alerted')).toHaveLength(1);
+    expect(stale.chats).toHaveLength(1);
+    const ok = stub({ lastOkAt: T0 });
+    const rr = await Promise.all([1, 2].map(() => runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 60_000, fetchFn: ok.fetchFn })));
+    expect(rr.filter((r) => r === 'recovered')).toHaveLength(1);
+    expect(ok.chats).toHaveLength(1);
+  });
 });
