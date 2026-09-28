@@ -69,12 +69,30 @@ describe('kizuna watchdog', () => {
     }
   });
 
-  test('Chat への送信に失敗したら通知済みにしない（次の tick で再試行）', async () => {
+  test('Chat への送信に失敗したら送信待ちのまま残し、次の tick で送り直す', async () => {
     const db = createKznTestDb() as unknown as D1Database;
     const bad = stub({ lastOkAt: T0 - STALE_AFTER_MS - 60_000, chatOk: false });
     expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0, fetchFn: bad.fetchFn })).toBe('chat_failed');
     const good = stub({ lastOkAt: T0 - STALE_AFTER_MS - 60_000 });
     expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 5 * 60_000, fetchFn: good.fetchFn })).toBe('alerted');
+    expect(good.chats).toHaveLength(1);
+    expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 10 * 60_000, fetchFn: good.fetchFn })).toBe('suppressed');
+    expect(good.chats).toHaveLength(1);
+  });
+
+  test('送信権を取った直後に落ちても（送信前）、2分後の tick が送る', async () => {
+    const db = createKznTestDb() as unknown as D1Database;
+    // 停止通知の送信権だけ取られて送られていない状態
+    await db.prepare("INSERT INTO craval_watchdog (name, alerting, last_alert_at, notify_pending, notify_claimed_at) VALUES ('kizuna-notify-cron', 1, ?, 'alert', ?)").bind(T0, T0).run();
+    const s = stub({ lastOkAt: T0 - STALE_AFTER_MS - 60_000 });
+    expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 60_000, fetchFn: s.fetchFn })).toBe('suppressed');
+    expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 3 * 60_000, fetchFn: s.fetchFn })).toBe('alerted');
+    expect(s.chats).toEqual([expect.stringMatching(/止まっている可能性/)]);
+    // 復旧側も同じ
+    await db.prepare("UPDATE craval_watchdog SET alerting=0, notify_pending='recovery', notify_claimed_at=? WHERE name='kizuna-notify-cron'").bind(T0 + 4 * 60_000).run();
+    const ok = stub({ lastOkAt: T0 + 5 * 60_000 });
+    expect(await runKizunaWatchdog({ db, env: ENV, nowMs: T0 + 7 * 60_000, fetchFn: ok.fetchFn })).toBe('recovered');
+    expect(ok.chats).toEqual([expect.stringMatching(/復旧しました/)]);
   });
 
   test('並行 tick でも停止通知は1通・復旧通知も1通', async () => {

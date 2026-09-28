@@ -24,7 +24,8 @@ export function watchdogEnabled(env: WatchdogEnv): boolean {
 
 export type WatchdogResult = 'healthy' | 'alerted' | 'suppressed' | 'recovered' | 'chat_failed';
 
-interface State { alerting: number; last_alert_at: number | null }
+interface State { alerting: number; last_alert_at: number | null; notify_pending: string | null; notify_claimed_at: number | null }
+export const RESEND_AFTER_MS = 2 * 60_000;
 
 /** heartbeat を読み、健全かどうかと理由を返す（例外は投げない）。 */
 export async function checkHeartbeat(
@@ -58,6 +59,26 @@ async function postChat(webhookUrl: string, text: string, fetchFn: typeof fetch)
   }
 }
 
+function messageFor(kind: string, detail: string): string {
+  return kind === 'recovery'
+    ? `【きずな】通知 cron が復旧しました（${detail}）。`
+    : `【きずな】通知 cron が止まっている可能性があります（${detail}）。\n` +
+      `新着通知・返信期限の通知・日次ヘルスメールが届きません。Cloudflare の kizuna-notify-cron と anami-pat.jp を確認してください。`;
+}
+
+/**
+ * 送信待ちの通知を送る。送れたら notify_pending を消す。送れなければ残す（次の tick で送り直す）。
+ * 取り直しは notify_claimed_at の条件付き UPDATE＝並行 tick でも1つだけが送る。
+ */
+async function sendPending(db: D1Database, env: WatchdogEnv, kind: string, claimedAt: number, detail: string, fetchFn: typeof fetch): Promise<boolean> {
+  const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, messageFor(kind, detail), fetchFn);
+  if (ok) {
+    await db.prepare('UPDATE craval_watchdog SET notify_pending=NULL, notify_claimed_at=NULL WHERE name=? AND notify_pending=? AND notify_claimed_at=?')
+      .bind(WATCHDOG_NAME, kind, claimedAt).run();
+  }
+  return ok;
+}
+
 export async function runKizunaWatchdog(opts: {
   db: D1Database; env: WatchdogEnv; nowMs: number; fetchFn?: typeof fetch;
 }): Promise<WatchdogResult | null> {
@@ -67,36 +88,34 @@ export async function runKizunaWatchdog(opts: {
   const { healthy, detail } = await checkHeartbeat(env.KIZUNA_HEARTBEAT_URL!, env.KIZUNA_HEARTBEAT_TOKEN!, nowMs, fetchFn);
   await db.prepare('INSERT INTO craval_watchdog (name, alerting) VALUES (?, 0) ON CONFLICT DO NOTHING').bind(WATCHDOG_NAME).run();
   await db.prepare('UPDATE craval_watchdog SET last_checked_at=?, last_detail=? WHERE name=?').bind(nowMs, detail, WATCHDOG_NAME).run();
-  const state = await db.prepare('SELECT alerting, last_alert_at FROM craval_watchdog WHERE name=?').bind(WATCHDOG_NAME).first<State>();
-  const prevAlerting = Number(state?.alerting ?? 0);
-  const prevAlertAt = state?.last_alert_at == null ? null : Number(state.last_alert_at);
+  const state = await db.prepare('SELECT alerting, last_alert_at, notify_pending, notify_claimed_at FROM craval_watchdog WHERE name=?').bind(WATCHDOG_NAME).first<State>();
+
+  // 前回取った通知が送れていない（送信前に落ちた・Chat が失敗した）→ 2分以上経っていれば取り直して送る。
+  if (state?.notify_pending) {
+    const prevClaim = Number(state.notify_claimed_at ?? 0);
+    if (nowMs - prevClaim < RESEND_AFTER_MS) return 'suppressed';
+    const re = await db.prepare('UPDATE craval_watchdog SET notify_claimed_at=? WHERE name=? AND notify_pending=? AND notify_claimed_at IS ?')
+      .bind(nowMs, WATCHDOG_NAME, state.notify_pending, state.notify_claimed_at).run();
+    if ((re.meta?.changes ?? 0) !== 1) return 'suppressed';
+    const ok = await sendPending(db, env, state.notify_pending, nowMs, detail, fetchFn);
+    if (!ok) return 'chat_failed';
+    return state.notify_pending === 'recovery' ? 'recovered' : 'alerted';
+  }
 
   if (healthy) {
-    if (prevAlerting !== 1) return 'healthy';
+    if (Number(state?.alerting ?? 0) !== 1) return 'healthy';
     // 復旧通知の送信権を条件付き UPDATE で1つだけ取る（並行 tick でも1回）。
-    const claim = await db.prepare('UPDATE craval_watchdog SET alerting=0 WHERE name=? AND alerting=1').bind(WATCHDOG_NAME).run();
+    const claim = await db.prepare(
+      "UPDATE craval_watchdog SET alerting=0, notify_pending='recovery', notify_claimed_at=? WHERE name=? AND alerting=1 AND notify_pending IS NULL",
+    ).bind(nowMs, WATCHDOG_NAME).run();
     if ((claim.meta?.changes ?? 0) !== 1) return 'healthy';
-    const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, `【きずな】通知 cron が復旧しました（${detail}）。`, fetchFn);
-    if (!ok) {
-      await db.prepare('UPDATE craval_watchdog SET alerting=1 WHERE name=? AND alerting=0').bind(WATCHDOG_NAME).run();
-      return 'chat_failed';
-    }
-    return 'recovered';
+    return (await sendPending(db, env, 'recovery', nowMs, detail, fetchFn)) ? 'recovered' : 'chat_failed';
   }
   // 停止通知の送信権を条件付き UPDATE で1つだけ取る（未通知、または前回から1時間以上）。
   const claim = await db.prepare(
-    'UPDATE craval_watchdog SET alerting=1, last_alert_at=? WHERE name=? AND (alerting=0 OR last_alert_at IS NULL OR last_alert_at <= ?)',
-  ).bind(nowMs, WATCHDOG_NAME, nowMs - REALERT_AFTER_MS).run();
+    "UPDATE craval_watchdog SET alerting=1, last_alert_at=?, notify_pending='alert', notify_claimed_at=? " +
+      'WHERE name=? AND notify_pending IS NULL AND (alerting=0 OR last_alert_at IS NULL OR last_alert_at <= ?)',
+  ).bind(nowMs, nowMs, WATCHDOG_NAME, nowMs - REALERT_AFTER_MS).run();
   if ((claim.meta?.changes ?? 0) !== 1) return 'suppressed';
-  const text =
-    `【きずな】通知 cron が止まっている可能性があります（${detail}）。\n` +
-    `新着通知・返信期限の通知・日次ヘルスメールが届きません。Cloudflare の kizuna-notify-cron と anami-pat.jp を確認してください。`;
-  const ok = await postChat(env.WATCHDOG_CHAT_WEBHOOK_URL!, text, fetchFn);
-  if (!ok) {
-    // 送れなかった＝通知済みにしない（次の tick で再試行）。取った送信権だけを元に戻す。
-    await db.prepare('UPDATE craval_watchdog SET alerting=?, last_alert_at=? WHERE name=? AND last_alert_at=?')
-      .bind(prevAlerting, prevAlertAt, WATCHDOG_NAME, nowMs).run();
-    return 'chat_failed';
-  }
-  return 'alerted';
+  return (await sendPending(db, env, 'alert', nowMs, detail, fetchFn)) ? 'alerted' : 'chat_failed';
 }
