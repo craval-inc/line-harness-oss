@@ -117,6 +117,9 @@ if (!existsSync(tomlPath)) {
       errors.push(`R2 binding not allowed in kzn: binding=${binding} bucket=${bucket}（許可は LINE_MEDIA → kizuna-shonin-uploads のみ・公開用 IMAGES は不可）`);
     }
   }
+  // 返信予約枠（受信箱からの 1:1 返信の枠を配信に使わせない）。kzn は無料200通運用なので必須・正の整数。
+  const replyReserve = tableValue(toml, 'vars', 'LINE_REPLY_RESERVE');
+  if (!/^[1-9][0-9]*$/.test(replyReserve ?? '')) errors.push(`LINE_REPLY_RESERVE must be a positive integer (got ${replyReserve ?? 'unset'}) — 配信が返信の枠を食い尽くさないための予約枠`);
   const mediaStore = tableValue(toml, 'vars', 'LINE_MEDIA_STORE');
   if (mediaStore === '1' && !r2Blocks.length) errors.push('LINE_MEDIA_STORE="1" requires [[r2_buckets]] binding LINE_MEDIA → kizuna-shonin-uploads');
   if (mediaStore === '1') console.log('[check-kzn-target] NOTE: LINE_MEDIA_STORE=1 — 本番 D1 に K003_line_media.sql を先に適用すること（未適用だと受信の保存 batch が失敗し 500＝LINE 再送）');

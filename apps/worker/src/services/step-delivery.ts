@@ -21,6 +21,7 @@ import type { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
 import { getQuotaUsage, quotaEnabled, type QuotaEnv } from './quota.js';
+import { replyReserveExhausted } from './quota-alert.js';
 
 /**
  * Replace template variables in message content.
@@ -145,6 +146,12 @@ export async function processStepDeliveries(
   const recovered = await recoverStuckDeliveries(db);
   if (recovered > 0) {
     console.warn(`[step-delivery] recovered ${recovered} stuck 'delivering' enrollment(s)`);
+  }
+
+  // [Craval kzn] 返信予約枠を割るなら今回は送らない（受信箱からの返信の枠を温存）。予約0なら本家と同一。
+  if (await replyReserveExhausted(lineClient)) {
+    console.warn('[step-delivery] skipped: LINE plan remaining is within the reply reserve');
+    return;
   }
 
   // Enrollments stay untouched; the next tick re-evaluates once under quota.

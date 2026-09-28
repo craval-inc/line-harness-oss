@@ -23,7 +23,7 @@ vi.mock('./event-bus.js', () => ({
   fireOutgoingWebhooks: (...args: unknown[]) => fireOutgoingWebhooks(...args),
 }));
 
-const { getLinePlanQuotaShortfall, notifyQuotaAlert, countDeliverableAudience, allTargetGuardAudience } =
+const { getLinePlanQuotaShortfall, notifyQuotaAlert, countDeliverableAudience, allTargetGuardAudience, setLineReplyReserve, replyReserveExhausted } =
   await import('./quota-alert.js');
 
 function client(quota: { type: string; value?: number }, totalUsage: number) {
@@ -83,6 +83,63 @@ describe('getLinePlanQuotaShortfall', () => {
       getMessageQuotaConsumption: async () => ({ totalUsage: 0 }),
     };
     expect(await getLinePlanQuotaShortfall(broken, 500)).toBeNull();
+  });
+});
+
+describe('[Craval kzn] 返信予約枠 LINE_REPLY_RESERVE', () => {
+  beforeEach(() => setLineReplyReserve(0));
+
+  test('予約0（未設定）は本家と同一: 残り=配信人数なら送れる', async () => {
+    expect(await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 100), 100)).toBeNull();
+  });
+
+  test('予約50: 残り100・配信100人は不足（使えるのは50）', async () => {
+    setLineReplyReserve(50);
+    const shortfall = await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 100), 100);
+    expect(shortfall).toMatchObject({ remaining: 100, audience: 100, reserved: 50 });
+  });
+
+  test('予約50: 残り100・配信50人は送れる（予約ちょうど残る）', async () => {
+    setLineReplyReserve(50);
+    expect(await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 100), 50)).toBeNull();
+  });
+
+  test('予約50: 残り50以下は audience の数え失敗でもブロック', async () => {
+    setLineReplyReserve(50);
+    const failing = vi.fn(async () => {
+      throw new Error('count failed');
+    });
+    const shortfall = await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 150), failing);
+    expect(shortfall).toMatchObject({ remaining: 50, reserved: 50 });
+  });
+
+  test('replyReserveExhausted: 予約0は常に false（API も呼ばない）', async () => {
+    const quota = vi.fn(async () => ({ type: 'limited', value: 200 }));
+    expect(await replyReserveExhausted({ getMessageQuota: quota, getMessageQuotaConsumption: async () => ({ totalUsage: 200 }) })).toBe(false);
+    expect(quota).not.toHaveBeenCalled();
+  });
+
+  test('replyReserveExhausted: 確認 API の失敗は fail-open（false）', async () => {
+    setLineReplyReserve(50);
+    const broken = {
+      getMessageQuota: async () => {
+        throw new Error('500');
+      },
+      getMessageQuotaConsumption: async () => ({ totalUsage: 0 }),
+    };
+    expect(await replyReserveExhausted(broken)).toBe(false);
+  });
+
+  test('replyReserveExhausted: 残り−予約<1 で true（以後 TTL 内はキャッシュ値）', async () => {
+    setLineReplyReserve(50);
+    expect(await replyReserveExhausted(client({ type: 'limited', value: 200 }, 150))).toBe(true);
+  });
+
+  test('負数・非数の予約は 0 扱い', async () => {
+    setLineReplyReserve(Number.NaN);
+    expect(await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 100), 100)).toBeNull();
+    setLineReplyReserve(-5);
+    expect(await getLinePlanQuotaShortfall(client({ type: 'limited', value: 200 }, 100), 100)).toBeNull();
   });
 });
 

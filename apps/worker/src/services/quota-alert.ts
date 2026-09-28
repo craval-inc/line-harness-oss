@@ -60,6 +60,20 @@ export interface PlanQuotaShortfall {
   consumption: number;
   remaining: number;
   audience: number;
+  /** [Craval kzn] 人の返信用に配信から除外している予約枠（0/未設定=本家挙動）。 */
+  reserved?: number;
+}
+
+// ─── [Craval kzn] 返信予約枠 ────────────────────────────────────────────────
+// 受信箱からの 1:1 返信（Push）は配信と同じ月間枠を消費する。無料 200 通のまま運用するため、
+// 一斉配信・ステップ配信・リマインダーは「残り − 予約枠」までしか使わせない＝返信の枠を温存する。
+// env LINE_REPLY_RESERVE（fetch / scheduled 入口で applyCravalRuntimeFlags が反映）。未設定=0=本家と同一。
+let lineReplyReserve = 0;
+export function setLineReplyReserve(n: number): void {
+  lineReplyReserve = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+export function getLineReplyReserve(): number {
+  return lineReplyReserve;
 }
 
 /** LINE が月間上限超過の 429 で返す message (一字一句この文言)。 */
@@ -165,20 +179,23 @@ export async function getLinePlanQuotaShortfall(
 
   // remaining === 0 は audience に依らず不足が確定 (何も送れない)。audience の
   // COUNT はここでは表示用でしかないので、その失敗で確定ブロックを取り消さない。
-  if (snapshot.remaining === 0) {
+  // [Craval kzn] 予約枠を差し引いた「配信に使ってよい残り」で判定する（予約0＝本家と同一）。
+  const reserved = lineReplyReserve;
+  const usable = Math.max(0, snapshot.remaining - reserved);
+  if (usable === 0) {
     let audienceCount = 0;
     try {
       audienceCount = typeof audience === 'function' ? await audience() : audience;
     } catch (err) {
       console.error('quota shortfall audience count failed (blocking anyway):', err);
     }
-    return { ...snapshot, audience: audienceCount };
+    return { ...snapshot, audience: audienceCount, ...(reserved > 0 ? { reserved } : {}) };
   }
 
   try {
     const audienceCount = typeof audience === 'function' ? await audience() : audience;
-    if (audienceCount > 0 && snapshot.remaining < audienceCount) {
-      return { ...snapshot, audience: audienceCount };
+    if (audienceCount > 0 && usable < audienceCount) {
+      return { ...snapshot, audience: audienceCount, ...(reserved > 0 ? { reserved } : {}) };
     }
     return null;
   } catch (err) {
@@ -434,4 +451,22 @@ export async function notifyQuotaAlert(
     console.error(`notifyQuotaAlert failed (account ${input.lineAccountId}):`, err);
     return false;
   }
+}
+
+/**
+ * [Craval kzn] 1通ずつ送る定期配信（ステップ配信・リマインダー）の前ガード。
+ * 予約枠が設定されていて「残り − 予約枠 < 1」なら true（＝今回の tick は送らない・次の tick で再評価）。
+ * 予約0・上限なしプラン・確認 API の失敗は false（fail-open＝本家と同じく送信を止めない）。
+ */
+export async function replyReserveExhausted(client: PlanQuotaClient): Promise<boolean> {
+  if (lineReplyReserve <= 0) return false;
+  let snapshot: PlanQuotaSnapshot | null;
+  try {
+    snapshot = await readPlanQuotaSnapshot(client, 'craval-reply-reserve');
+  } catch (err) {
+    console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
+    return false;
+  }
+  if (!snapshot) return false;
+  return snapshot.remaining - lineReplyReserve < 1;
 }

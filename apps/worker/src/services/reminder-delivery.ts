@@ -15,11 +15,17 @@ import {
 } from '@line-crm/db';
 import type { LineClient, Message } from '@line-crm/line-sdk';
 import { addJitter, sleep } from './stealth.js';
+import { replyReserveExhausted } from './quota-alert.js';
 
 export async function processReminderDeliveries(
   db: D1Database,
   lineClient: LineClient,
 ): Promise<void> {
+  // [Craval kzn] 返信予約枠を割るなら今回は送らない（予約0なら本家と同一）。
+  if (await replyReserveExhausted(lineClient)) {
+    console.warn('[reminder-delivery] skipped: LINE plan remaining is within the reply reserve');
+    return;
+  }
   const now = jstNow();
   const dueReminders = await getDueReminderDeliveries(db, now);
 

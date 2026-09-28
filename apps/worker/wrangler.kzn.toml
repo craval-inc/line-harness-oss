@@ -74,6 +74,8 @@ LINE_SEND_DISABLED = "1"
 # Phase 1 はイベントバス（送信Webhook・スコア・自動化・automation_logs）と auto_replies を止める。Phase 3 で外す。
 EVENT_BUS_DISABLED = "1"
 LINE_MEDIA_STORE = "1"
+# 返信予約枠: 一斉配信・ステップ配信・リマインダーは「LINE の残り通数 − 50」までしか使わない（受信箱からの 1:1 返信の枠を温存。無料200通運用）
+LINE_REPLY_RESERVE = "50"
 MIRROR_URL = "https://anami-pat.jp/api/line-harness-event"
 
 # Secrets (要 `wrangler secret put ... -c wrangler.kzn.toml`・値は Bitwarden `line-harness-kzn`):
