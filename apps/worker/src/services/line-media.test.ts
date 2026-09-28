@@ -279,3 +279,60 @@ describe('きずなへの状態転送', () => {
     expect(q('SELECT mirror_attempts FROM line_media')[0].mirror_attempts).toBe(0);
   });
 });
+
+describe('CODEX レビュー反映（並行・準備中・取消後の削除失敗）', () => {
+  test('202（動画・音声の準備中）は保存せず再試行（done にしない）', async () => {
+    await save([media('m1', 'video')]);
+    const out = await fetchLineMedia(deps(vi.fn(async () => new Response(null, { status: 202 })) as never), 'm1');
+    expect(out).toBe('pending');
+    expect(q('SELECT status, reason, attempts FROM line_media')[0]).toMatchObject({ status: 'pending', reason: 'preparing', attempts: 1 });
+    expect(r2.objects.size).toBe(0);
+  });
+
+  test('取得中（lease 有効）の行は別の実行が取らない＝並行取得でオブジェクトを消さない', async () => {
+    await save([media('m1')]);
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((r) => { releaseFirst = r; });
+    const slow = vi.fn(async () => { await gate; return contentResponse(8); });
+    const first = fetchLineMedia(deps(slow as never), 'm1');
+    await new Promise((r) => setTimeout(r, 0));
+    const second = vi.fn(async () => contentResponse(8));
+    expect(await fetchLineMedia(deps(second as never), 'm1')).toBe('skipped');
+    expect(second).not.toHaveBeenCalled();
+    releaseFirst();
+    expect(await first).toBe('done');
+    const row = (await getMediaRow(db.asD1(), 'm1'))!;
+    expect(r2.objects.has(row.r2_key!)).toBe(true);
+  });
+
+  test('lease の期限が切れていれば取り直せる（落ちた実行の取り残し）', async () => {
+    await save([media('m1')]);
+    db.raw.prepare('UPDATE line_media SET lease_until = ? WHERE line_message_id = ?').run(T0 - 1, 'm1');
+    expect(await fetchLineMedia(deps(vi.fn(async () => contentResponse(3)) as never), 'm1')).toBe('done');
+  });
+
+  test('done に他の実行が先に更新していても、同じキーのオブジェクトは消さない', async () => {
+    await save([media('m1')]);
+    const fetchFn = vi.fn(async () => {
+      // 取得中に別経路が done にした（lease を無視した旧実行など）
+      db.raw.prepare("UPDATE line_media SET status='done', r2_key='line-media/x/m1.jpg' WHERE line_message_id='m1'").run();
+      return contentResponse(8);
+    });
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
+    expect(r2.objects.size).toBe(1); // 書いたものは残す（削除しない）
+  });
+
+  test('取得中に取消 → R2 削除に失敗してもキーを記録し、Cron の削除で消える', async () => {
+    await save([media('m1')]);
+    const origDelete = r2.delete.bind(r2);
+    let failDelete = true;
+    r2.delete = async (k: string) => { if (failDelete) throw new Error('r2 delete down'); return origDelete(k); };
+    const fetchFn = vi.fn(async () => { await applyUnsend(db.asD1(), 'm1', T0 + 1); return contentResponse(8); });
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('unsent');
+    expect(r2.objects.size).toBe(1);
+    expect(q('SELECT r2_key IS NOT NULL AS has_key, r2_deleted FROM line_media')[0]).toMatchObject({ has_key: 1, r2_deleted: 0 });
+    failDelete = false;
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 2)).toBe(1);
+    expect(r2.objects.size).toBe(0);
+  });
+});

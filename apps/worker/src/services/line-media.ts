@@ -170,7 +170,7 @@ function trimReason(r: string): string {
 async function markExpired(db: D1Database, id: string, reason: string, now: number): Promise<void> {
   await db
     .prepare(
-      `UPDATE line_media SET status = 'expired', reason = ?, mirrored = 0, mirror_attempts = 0, updated_at = ?
+      `UPDATE line_media SET status = 'expired', reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
         WHERE line_message_id = ? AND status = 'pending'`,
     )
     .bind(trimReason(reason), now, id)
@@ -183,7 +183,7 @@ async function markRetry(db: D1Database, row: MediaRow, reason: string, now: num
   if (nextAttempt >= MEDIA_RETRY_SCHEDULE_MS.length) {
     await db
       .prepare(
-        `UPDATE line_media SET status = 'failed', attempts = ?, reason = ?, mirrored = 0, mirror_attempts = 0, updated_at = ?
+        `UPDATE line_media SET status = 'failed', attempts = ?, reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
           WHERE line_message_id = ? AND status = 'pending'`,
       )
       .bind(nextAttempt, trimReason(reason), now, row.line_message_id)
@@ -192,7 +192,7 @@ async function markRetry(db: D1Database, row: MediaRow, reason: string, now: num
   }
   await db
     .prepare(
-      `UPDATE line_media SET attempts = ?, reason = ?, next_attempt_at = ?, updated_at = ?
+      `UPDATE line_media SET attempts = ?, reason = ?, next_attempt_at = ?, lease_until = NULL, updated_at = ?
         WHERE line_message_id = ? AND status = 'pending'`,
     )
     .bind(nextAttempt, trimReason(reason), row.received_at + MEDIA_RETRY_SCHEDULE_MS[nextAttempt], now, row.line_message_id)
@@ -225,14 +225,27 @@ async function readLimited(res: Response, maxBytes: number): Promise<Uint8Array 
   return out;
 }
 
+/** 取得の排他期限（Content API 20秒＋R2 書込の余裕）。期限切れなら別の実行が取り直せる。 */
+export const MEDIA_LEASE_MS = 2 * 60 * 1000;
+
 /**
- * 1 件取得して保存する。取得待ち（pending）の行だけが対象。
- * 返り値は処理後の状態（pending＝再試行予定）。取消済み・対象外は 'skipped'。
+ * 1 件取得して保存する。取得待ち（pending）で、他の実行が取得中（lease 有効）でない行だけが対象。
+ * 返り値は処理後の状態（pending＝再試行予定）。取消済み・対象外・他が取得中は 'skipped'。
  */
 export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string): Promise<FetchOutcome> {
   const now = deps.now ?? Date.now;
   const fetchFn = deps.fetchFn ?? fetch;
   const { db } = deps;
+  // 排他: Webhook 直後の取得と Cron が同じ行を同時に取らない（並行取得で正常なオブジェクトを消す事故の防止）。
+  const t0 = now();
+  const claim = await db
+    .prepare(
+      `UPDATE line_media SET lease_until = ?, updated_at = ?
+        WHERE line_message_id = ? AND status = 'pending' AND (lease_until IS NULL OR lease_until <= ?)`,
+    )
+    .bind(t0 + MEDIA_LEASE_MS, t0, lineMessageId, t0)
+    .run();
+  if ((claim.meta?.changes ?? 0) === 0) return 'skipped';
   const row = await getMediaRow(db, lineMessageId);
   if (!row || row.status !== 'pending') return 'skipped';
 
@@ -250,9 +263,10 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
     await markExpired(db, row.line_message_id, `gone_${res.status}`, now());
     return 'expired';
   }
-  if (!res.ok) {
+  // 202 = 動画・音声の変換準備中（本文は空）。保存せず再試行。200 以外は全て一時失敗扱い。
+  if (res.status !== 200) {
     await res.body?.cancel().catch(() => {});
-    return markRetry(db, row, `http_${res.status}`, now());
+    return markRetry(db, row, res.status === 202 ? 'preparing' : `http_${res.status}`, now());
   }
   const declared = Number(res.headers.get('Content-Length') ?? '0');
   if (declared > MAX_MEDIA_BYTES) {
@@ -278,24 +292,34 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
   } catch (err) {
     return markRetry(db, row, `r2: ${err instanceof Error ? err.name : 'error'}`, now());
   }
-  // 保存中に取消された（status が pending でなくなった）場合は、書いたオブジェクトを消す。
   const upd = await db
     .prepare(
       `UPDATE line_media SET status = 'done', r2_key = ?, content_type = ?, size = ?, reason = NULL,
-              mirrored = 0, mirror_attempts = 0, updated_at = ?
+              mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
         WHERE line_message_id = ? AND status = 'pending'`,
     )
     .bind(key, contentType, bytes.byteLength, now(), row.line_message_id)
     .run();
-  if ((upd.meta?.changes ?? 0) === 0) {
-    await deps.r2.delete(key).catch(() => {});
+  if ((upd.meta?.changes ?? 0) === 1) return 'done';
+
+  // 更新できなかった: 取消された時だけ、書いたオブジェクトを消す（他の実行が done にした場合は同じキーなので消さない）。
+  const cur = await getMediaRow(db, row.line_message_id);
+  if (cur?.status !== 'unsent') return 'skipped';
+  // 削除に失敗しても Cron（purgeUnsentMedia）が拾えるよう、先にキーを記録してから消す。
+  await db
+    .prepare(`UPDATE line_media SET r2_key = ?, r2_deleted = 0, updated_at = ? WHERE line_message_id = ? AND status = 'unsent'`)
+    .bind(key, now(), row.line_message_id)
+    .run();
+  try {
+    await deps.r2.delete(key);
     await db
-      .prepare(`UPDATE line_media SET r2_deleted = 1, updated_at = ? WHERE line_message_id = ?`)
+      .prepare(`UPDATE line_media SET r2_deleted = 1, r2_key = NULL, updated_at = ? WHERE line_message_id = ? AND status = 'unsent'`)
       .bind(now(), row.line_message_id)
       .run();
-    return 'unsent';
+  } catch (err) {
+    console.error(`[line-media] delete after unsend failed msg=${row.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
   }
-  return 'done';
+  return 'unsent';
 }
 
 /** 取消済みで保存済みのオブジェクトを R2 から消す。 */
@@ -369,7 +393,11 @@ export async function mirrorMediaRow(deps: MediaMirrorDeps, lineMessageId: strin
   const row = await getMediaRow(deps.db, lineMessageId);
   if (!row) return false;
   if (row.status === 'pending' || row.status === 'unsent') {
-    await deps.db.prepare(`UPDATE line_media SET mirrored = 1, updated_at = ? WHERE line_message_id = ?`).bind(now(), lineMessageId).run();
+    // 読んだ時点の状態のままの時だけ（並行して done 等に変わっていたら未転送のまま残し、Cron が送る）。
+    await deps.db
+      .prepare(`UPDATE line_media SET mirrored = 1, updated_at = ? WHERE line_message_id = ? AND status = ?`)
+      .bind(now(), lineMessageId, row.status)
+      .run();
     return true;
   }
   try {
