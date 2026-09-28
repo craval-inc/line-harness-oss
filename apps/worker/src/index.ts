@@ -178,6 +178,16 @@ export type Env = {
 
 const app = new Hono<Env>();
 
+// [Craval] WEBHOOK_MAINTENANCE=1（D1 migration 中）は /webhook 以外の全リクエスト（管理 API・LIFF・静的配信・
+// 公開フォーム等）も 503 で止める。移行中に成功した書き込みが bookmark restore で消えるのを防ぐ。
+// /webhook は routes/webhook.ts が署名検証後に 503（LINE の再送に回す）。未設定なら本家挙動のまま。
+app.use('*', async (c, next) => {
+  if (c.env.WEBHOOK_MAINTENANCE === '1' && new URL(c.req.url).pathname !== '/webhook') {
+    return c.json({ status: 'maintenance' }, 503, { 'Retry-After': '900', 'Cache-Control': 'no-store' });
+  }
+  return next();
+});
+
 // Private Workers Cache pilot: only responses that deliberately declare a
 // public Cache-Control policy may enter the cache. This wrapper runs after all
 // downstream handlers and supplies no-store to every unmarked response.

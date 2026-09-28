@@ -30,7 +30,7 @@ kzn（きずな）で実施済みの手順（`migrations-kzn/APPLY-v0.24.md`）�
 1. **マイル機能（本家 v0.24 の新機能）を使うか** — 既定の手順は「止める」（`craval-post-v024-mileage-off.sql` を当てる）。
    - 止めないと、LINE で「マイル」と送った友だちに本家の残高案内 Flex が自動返信され、友だち追加・タグ等でポイントが付き始める。セールスキャスト（営業 BPO の応募・問い合わせ）・フゾカテ（家庭教師）に対応するポイント制度は無いので、止める推奨。
    - 使う場合は `--keep-mileage` で実行（本家既定のまま）。
-2. **実施タイミング** — sbo はセールスキャスト再始動中（2026-09-28）。友だち 1・受信 0 なので影響は小さいが、LINE 集客を始める前にやるのが最も安全。メンテ中（最大 15 分目標）は LINE の受信が 503 になり、LINE の再送に頼る（再送 OFF だとその間の受信を取りこぼす）。
+2. **実施タイミング** — sbo はセールスキャスト再始動中（2026-09-28）。友だち 1・受信 0 なので影響は小さいが、LINE 集客を始める前にやるのが最も安全。メンテ中（最大 15 分目標）は Worker 全体が 503（受信・管理画面・LIFF・公開フォームすべて）になり、LINE の受信は LINE の再送に頼る。**「Webhookの再送」ON が実施の必須条件**（LINE Developers で加藤さんが確認・ON にする）。ON でも LINE は到達を保証しないので、取りこぼしゼロが必須なら実施しない判断もあり得る（sbo/fzk は受信実績ほぼ 0 なので実害は小さい）。
 3. **管理画面の Safari 対応** — 本家 v0.24 の管理画面は httpOnly Cookie 認証。`*.pages.dev`（管理画面）と `*.workers.dev`（Worker）が別サイトのため `ADMIN_ALLOW_CROSS_SITE=true` が必要で、**Chrome のみ**（Safari 不可）。Safari でも使うならカスタムドメインで同一サイトにする（DNS 権限が要る）。
 
 ## 4. 手順（テナントごと。sbo→fzk の順でも逆でもよい。1 テナント 15〜20 分）
@@ -45,21 +45,37 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
 ```
 **注意**: `vite build` は `.wrangler/deploy/config.json`（既定 wrangler.toml 向けのリダイレクト）を作る。`wrangler deploy` は**必ず `-c wrangler.$T.toml` を付ける**（付ければ正しいテナントに出ることを dry-run で確認済み）。
 
-0. 事前: LINE Developers で「Webhookの再送」ON を確認（OFF ならメンテ中の受信を取りこぼす。ON にするか、受信の無い時間帯に実施）。
+0. **事前（メンテ前に全部済ませる）**
+   - LINE Developers で「Webhookの再送」が **ON**（必須。OFF なら実施しない）
+   - **戻し用の旧版を先にビルドし dry-run まで通す**（失敗時に restore 後すぐ出せるように）:
+     ```bash
+     OLD=$([ $T = sbo ] && echo 1e73e7d || echo 456bc59)
+     git -C /c/dev/line-harness-oss worktree add /c/temp/lh-old-$T $OLD
+     cp /c/dev/line-harness-oss/apps/worker/wrangler.$T.toml /c/temp/lh-old-$T/apps/worker/
+     cd /c/temp/lh-old-$T && pnpm install --frozen-lockfile && pnpm -r --filter "./packages/*" build
+     cd apps/worker && npx vite build && npx wrangler deploy --dry-run -c wrangler.$T.toml --outdir /c/temp/lh-old-$T-dry   # 成功を確認
+     cd /c/dev/line-harness-oss/apps/worker
+     ```
+   - 疎通テスト用の関数（HTTP ではなく **JSON の statusCode** で判定。テスト API 自体は常に HTTP 200 を返す）:
+     ```bash
+     LT=<Bitwarden のチャネルアクセストークン>   # sbo=line-harness-sbo-api-key 等・値は表示しない
+     whtest() { curl -s -X POST -H "Authorization: Bearer $LT" -H 'Content-Type: application/json' -d '{}' https://api.line.me/v2/bot/channel/webhook/test | python -c "import sys,json;d=json.load(sys.stdin);print(d);sys.exit(0 if d.get('statusCode')==int(sys.argv[1]) else 1)" "$1"; }
+     ```
 1. **メンテナンスで新 Worker をデプロイ**（ここから時計・15 分目標）
    `npx wrangler deploy -c wrangler.$T.toml --var WEBHOOK_MAINTENANCE:1`
-   確認: LINE の Webhook 疎通テスト（`POST /v2/bot/channel/webhook/test`）が 503。
+   確認: `whtest 503`（`success=false`・`statusCode=503`）。管理画面・LIFF も 503 になる（本手順の Worker は `WEBHOOK_MAINTENANCE=1` で /webhook 以外を全て 503 にする＝移行中の書き込みを作らない）。
 2. **退避・③migration・④後処理・⑤検証ゲート** — 一括スクリプト（最初の失敗で全体停止）
    `bash ../../scripts/craval-apply-v024.sh $T`（マイルを使う判断なら `--keep-mileage`）
    内容: 未適用確認 → bookmark＋export → 事前件数 → 本家 046〜072 → マイル停止 → 事後件数一致（chats は重複統合分だけ減ってよい）→ `craval-d1-gate.mjs`。
 3. **メンテ解除で新 Worker をデプロイ**
-   `npx wrangler deploy -c wrangler.$T.toml` → Webhook 疎通テスト 200。
+   `npx wrangler deploy -c wrangler.$T.toml` → `whtest 200`（`success=true`・`statusCode=200`）。
 4. **管理画面を v0.24 で作り直す**（旧画面は localStorage 認証なので新 Worker ではログインできない）
    ```bash
    printf 'https://line-harness-%s-admin.pages.dev' $T | npx wrangler secret put ADMIN_ORIGIN -c wrangler.$T.toml   # 念のため再設定
    cd ../web && rm -rf out .next && NEXT_PUBLIC_API_URL=https://line-harness-$T.craval.workers.dev NEXT_PUBLIC_UPDATE_BANNER_ENABLED=false npx next build
-   grep -rl "line-harness-$T.craval.workers.dev" out | wc -l   # 1 以上
-   grep -rl "line-harness-kzn\|line-harness-sbo\|line-harness-fzk" out | grep -v "line-harness-$T" | wc -l   # 0（apps/web/.env.production は sbo の URL なので env で必ず上書き）
+   # 内容で検査し、他テナントの URL が1つでもあればここで止める（apps/web/.env.production は sbo の URL なので env で必ず上書き）
+   grep -rqF "line-harness-$T.craval.workers.dev" out || { echo "NG: 自テナント URL が無い"; false; }
+   for o in kzn sbo fzk; do [ $o = $T ] && continue; if grep -rqF "line-harness-$o" out; then echo "NG: $o の URL が混入"; false; fi; done
    npx wrangler pages deploy out --project-name=line-harness-$T-admin --branch=main --commit-dirty=true
    ```
    確認: 管理画面に API_KEY でログインできる（Chrome）。
@@ -69,8 +85,7 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
 
 ## 5. 失敗時
 
-- **②〜⑤で止まった（メンテ中＝D1 に受信は書いていない）**: 以降は当てない → `npx wrangler d1 time-travel restore line-harness-$T -c wrangler.$T.toml --bookmark=<bookmark.txt の値>` → 旧コードに戻す:
-  `git worktree add /c/temp/lh-old <sbo=1e73e7d / fzk=456bc59>` → `cp apps/worker/wrangler.$T.toml /c/temp/lh-old/apps/worker/` → そこで `pnpm install && pnpm --filter @line-crm/line-sdk build && cd apps/worker && npx wrangler deploy -c wrangler.$T.toml`（旧コードに `ADMIN_ALLOW_CROSS_SITE` 等の新しい vars があっても無害）→ 疎通テスト 200 → 旧管理画面は触っていないのでそのまま使える。
+- **②〜⑤で止まった（メンテ中＝Worker 全体が 503 で D1 に何も書いていない）**: 以降は当てない → `npx wrangler d1 time-travel restore line-harness-$T -c wrangler.$T.toml --bookmark=<bookmark.txt の値>` → **手順0で用意済みの旧版**を出す: `cd /c/temp/lh-old-$T/apps/worker && npx wrangler deploy -c wrangler.$T.toml`（旧コードに `ADMIN_ALLOW_CROSS_SITE` 等の新しい vars があっても無害）→ `whtest 200` → 旧管理画面は触っていないのでそのまま使える。
 - **③の後（新 Worker で受信済み）に問題**: bookmark に戻すと受信が消えるので restore しない。`--var WEBHOOK_MAINTENANCE:1` で受信を止めて前進修正。
 
 ## 6. 所要時間（見込み）
