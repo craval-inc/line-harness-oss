@@ -1,6 +1,6 @@
 # sbo（セールスキャスト）/ fzk（フゾカテ）本番を本家 v0.24（craval-v0.24）に上げる手順
 
-作成: 2026-09-28（調査・準備のみ。本番未実施）/ Craval OS `task_caf9e1d8a31843d08519`
+作成: 2026-09-28 / **本番実施済み 2026-09-28**（下記 §7）/ Craval OS `task_caf9e1d8a31843d08519`
 kzn（きずな）で実施済みの手順（`migrations-kzn/APPLY-v0.24.md`）を sbo/fzk 向けにしたもの。kzn 専用の前後処理（kzn-pre-048・K001〜K004・受信箱/ミラー/送信禁止）は**入れない**＝sbo/fzk は「本家の挙動＋Craval セキュリティ修正（C-1/C-2/M-2/M-5/H-4/C-5）」のみ。
 
 ## 1. 現状（2026-09-28 実測・cf-craval 48cf2f856a84ba4baca7b9e4484b50c1）
@@ -100,3 +100,22 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
 ## 6. 所要時間（見込み）
 
 1 テナント: 準備（ビルド・旧版 dry-run）15 分・メンテ窓 約 20 分（16 分待機＋適用数分）・管理画面/LIFF 10 分・確認 5 分 ＝ 約 50 分。2 テナントは準備を並行すれば約 1.5 時間。
+
+## 7. 実施記録（2026-09-28・加藤さん指示「全部すすめて」）
+
+判断: マイル機能は停止／今すぐ実施／「Webhookの再送」は**未確認のまま実施**（受信ほぼ0のため必須条件から外す）／管理画面は Chrome 専用（ADMIN_ALLOW_CROSS_SITE=true）。
+
+| | fzk | sbo |
+|---|---|---|
+| メンテ窓 | 14:42:30〜15:05:59（23分29秒・うち16分は旧版実行の待機） | 15:08:47〜15:31:55（23分08秒） |
+| 事前事後件数 | 一致（friends 0・scenarios 1・steps 1 ほか 0） | 一致（friends 1・scenarios 3・tags 7・line_accounts 1 ほか 0） |
+| ゲート | OK（スキーマ=本家 v0.24・マイル自動応答無効・ルール0・残高0） | OK（同） |
+| bookmark（移行前） | `00004f7e-00000000-000050f4-583b0a170ea507bdf3e3a5d582039f31` | `00008474-00000000-000050f4-9747e5bd650604249df55f4cdc9d7c96` |
+| Worker（最終） | `18a693f3`（ADMIN_ORIGIN 再設定後） | `29827f1e`（同） |
+| 疎通 | 署名済み空イベント 200・偽署名 401（fzk はチャネルアクセストークンが Bitwarden に無いため LINE 疎通 API ではなくチャネルシークレット署名で確認） | LINE Webhook 疎通テスト statusCode 200・偽署名 401 |
+| 公開面 | /api/* Bearer 無し 401・Bitwarden `line-harness-fzk` の API_KEY で Bearer 200・Cookie ログイン 200 | 同（`line-harness-sbo-api-key`） |
+| 自動応答 | マイル=無効のみ | お問い合わせ／応募=有効（従来どおり）・マイル=無効 |
+| 管理画面 | https://line-harness-fzk-admin.pages.dev（Cookie 認証版・実キー埋め込み無し・他テナント URL 混入無し） | https://line-harness-sbo-admin.pages.dev（同） |
+| LIFF | https://line-harness-fzk-liff.pages.dev 再ビルド（API=fzk Worker・LIFF ID 2010756572-22JdKNon） | 無し（従来どおり） |
+
+メモ: Bitwarden `line-harness-fzk` の notes は `API_KEY=…|ADMIN_API_KEY=…` の1行形式（`|` 区切り）。キーは変更していない。
