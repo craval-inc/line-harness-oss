@@ -75,7 +75,7 @@ export function extFor(contentType: string | null, fileName: string | null | und
 /** 実行（取得権）ごとに一意なキー。別の実行と同じキーを書かない＝所有権を失った実行が自分の書込みだけを安全に消せる。 */
 export function mediaKey(hash: string, messageId: string, ext: string, attemptTag: string): string {
   const safeId = messageId.replace(/[^0-9A-Za-z]/g, '_');
-  const tag = attemptTag.replace(/[^0-9a-f]/gi, '').slice(0, 8).toLowerCase();
+  const tag = attemptTag.replace(/[^0-9a-f]/gi, '').toLowerCase(); // 取得トークン全体（32桁）＝実行間で衝突しない
   return `line-media/${hash}/${safeId}-${tag}.${ext}`;
 }
 
@@ -229,6 +229,8 @@ async function readLimited(res: Response, maxBytes: number): Promise<Uint8Array 
 
 /** 取得の排他期限（Content API 20秒＋R2 書込の余裕）。期限切れなら別の実行が取り直せる。 */
 export const MEDIA_LEASE_MS = 2 * 60 * 1000;
+/** 未確定の先行ログを回収するまでの猶予。実行中（遅い取得・書込み）のオブジェクトを消さないよう、取得権より十分長く取る。 */
+export const MEDIA_WAL_GRACE_MS = 30 * 60 * 1000;
 
 /**
  * 1 件取得して保存する。取得待ち（pending）で、他の実行が取得中（lease 有効）でない行だけが対象。
@@ -291,59 +293,79 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
 
   const contentType = (res.headers.get('Content-Type') ?? 'application/octet-stream').split(';')[0].trim().toLowerCase();
   const key = mediaKey(row.user_hash, row.line_message_id, extFor(contentType, row.file_name), token);
+  // 先行ログ: R2 に書く前に書込み意図を記録する（確定されなければ Cron が R2 から消す＝中断・例外でも孤立しない）。
+  try {
+    await db
+      .prepare(`INSERT INTO line_media_writes (r2_key, line_message_id, committed, created_at) VALUES (?, ?, 0, ?)`)
+      .bind(key, row.line_message_id, now())
+      .run();
+  } catch (err) {
+    return markRetry(db, row, `wal: ${err instanceof Error ? err.name : 'error'}`, now(), token);
+  }
   try {
     await deps.r2.put(key, bytes, { httpMetadata: { contentType } });
   } catch (err) {
     return markRetry(db, row, `r2: ${err instanceof Error ? err.name : 'error'}`, now(), token);
   }
-  const upd = await db
-    .prepare(
-      `UPDATE line_media SET status = 'done', r2_key = ?, content_type = ?, size = ?, reason = NULL,
-              mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
-        WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
-    )
-    .bind(key, contentType, bytes.byteLength, now(), row.line_message_id, token)
-    .run();
-  if ((upd.meta?.changes ?? 0) === 1) return 'done';
+  const [upd] = await db.batch([
+    db
+      .prepare(
+        `UPDATE line_media SET status = 'done', r2_key = ?, content_type = ?, size = ?, reason = NULL,
+                mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
+          WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
+      )
+      .bind(key, contentType, bytes.byteLength, now(), row.line_message_id, token),
+    // 確定できた時だけ先行ログを確定済みにする（同じトランザクション）。
+    db
+      .prepare(
+        `UPDATE line_media_writes SET committed = 1
+          WHERE r2_key = ? AND EXISTS (SELECT 1 FROM line_media WHERE line_message_id = ? AND r2_key = ? AND status = 'done')`,
+      )
+      .bind(key, row.line_message_id, key),
+  ]);
+  if ((upd?.meta?.changes ?? 0) === 1) return 'done';
 
-  // 確定できなかった（取消された・期限切れ後に別の実行が取り直した）: このキーは実行ごとに一意で DB のどこからも
-  // 参照されない＝自分の書込みを消す。削除に失敗したら orphan_key に記録し、Cron（purgeUnsentMedia）が消す。
-  try {
-    await deps.r2.delete(key);
-  } catch (err) {
-    console.error(`[line-media] delete own write failed msg=${row.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
-    const rec = await db
-      .prepare(`UPDATE line_media SET orphan_key = ?, updated_at = ? WHERE line_message_id = ? AND orphan_key IS NULL`)
-      .bind(key, now(), row.line_message_id)
-      .run();
-    if ((rec.meta?.changes ?? 0) === 0) console.error(`[line-media] orphan slot busy msg=${row.line_message_id} (manual cleanup needed)`);
-  }
+  // 確定できなかった（取消された・期限切れ後に別の実行が取り直した）: このキーは実行ごとに一意で DB から参照されない。
+  // 自分の書込みを消して先行ログも消す。削除に失敗したら先行ログが残り、Cron（purgeUnsentMedia）が回収する。
+  await discardWrite(db, deps.r2, key, row.line_message_id);
   const cur = await getMediaRow(db, row.line_message_id);
   return cur?.status === 'unsent' ? 'unsent' : 'skipped';
 }
 
-/** 取消済みで保存済みのオブジェクトと、所有権を失った実行の書き残し（orphan_key）を R2 から消す。 */
+/** 確定されなかった書込みを R2 から消し、先行ログも消す。失敗時はログを残す（Cron が再試行）。 */
+async function discardWrite(db: D1Database, r2: R2Bucket, key: string, lineMessageId: string): Promise<boolean> {
+  try {
+    await r2.delete(key);
+    await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ? AND committed = 0`).bind(key).run();
+    return true;
+  } catch (err) {
+    console.error(`[line-media] discard write failed msg=${lineMessageId}: ${err instanceof Error ? err.name : 'error'}`);
+    return false;
+  }
+}
+
+/** 取消済みで保存済みのオブジェクトと、確定されなかった書込み（先行ログが未確定のまま残ったもの）を R2 から消す。 */
 export async function purgeUnsentMedia(db: D1Database, r2: R2Bucket, now: number, limit = 20): Promise<number> {
   const rows = await db
     .prepare(`SELECT line_message_id, r2_key FROM line_media WHERE status = 'unsent' AND r2_key IS NOT NULL AND r2_deleted = 0 LIMIT ?`)
     .bind(limit)
     .all<{ line_message_id: string; r2_key: string }>();
   let n = 0;
-  const orphans = await db
-    .prepare(`SELECT line_message_id, orphan_key FROM line_media WHERE orphan_key IS NOT NULL LIMIT ?`)
-    .bind(limit)
-    .all<{ line_message_id: string; orphan_key: string }>();
-  for (const o of orphans.results ?? []) {
-    try {
-      await r2.delete(o.orphan_key);
-      await db
-        .prepare(`UPDATE line_media SET orphan_key = NULL, updated_at = ? WHERE line_message_id = ? AND orphan_key = ?`)
-        .bind(now, o.line_message_id, o.orphan_key)
-        .run();
-      n++;
-    } catch (err) {
-      console.error(`[line-media] orphan purge failed msg=${o.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
+  // 確定されずに残った先行ログ（猶予 30 分を過ぎたもの）: DB が参照していれば確定済みに、していなければ R2 から消す。
+  const stale = await db
+    .prepare(
+      `SELECT w.r2_key, w.line_message_id, (m.r2_key = w.r2_key AND m.status = 'done') AS referenced
+         FROM line_media_writes w LEFT JOIN line_media m ON m.line_message_id = w.line_message_id
+        WHERE w.committed = 0 AND w.created_at <= ? LIMIT ?`,
+    )
+    .bind(now - MEDIA_WAL_GRACE_MS, limit)
+    .all<{ r2_key: string; line_message_id: string; referenced: number | null }>();
+  for (const w of stale.results ?? []) {
+    if (w.referenced) {
+      await db.prepare(`UPDATE line_media_writes SET committed = 1 WHERE r2_key = ?`).bind(w.r2_key).run();
+      continue;
     }
+    if (await discardWrite(db, r2, w.r2_key, w.line_message_id)) n++;
   }
   for (const r of rows.results ?? []) {
     try {
@@ -352,6 +374,7 @@ export async function purgeUnsentMedia(db: D1Database, r2: R2Bucket, now: number
         .prepare(`UPDATE line_media SET r2_deleted = 1, r2_key = NULL, updated_at = ? WHERE line_message_id = ?`)
         .bind(now, r.line_message_id)
         .run();
+      await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ?`).bind(r.r2_key).run();
       n++;
     } catch (err) {
       console.error(`[line-media] purge failed msg=${r.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);

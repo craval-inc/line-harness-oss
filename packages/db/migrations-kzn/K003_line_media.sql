@@ -8,7 +8,8 @@
 -- mirrored: 状態の変更をきずなへ転送済みか（0＝未転送。Cron が再転送する）
 -- lease_until / lease_token: 取得中の排他（Webhook 直後の取得と Cron が同じ行を同時に取らない）。期限切れなら取り直せる。
 --   状態の確定（done/再試行/確定失敗）は lease_token が一致する所有者だけが行える。
--- orphan_key: 所有権を失った実行が書いてしまい、削除にも失敗したオブジェクト（Cron が削除して NULL に戻す）。
+-- line_media_writes: R2 へ書く「前」に記録する書込み意図（先行ログ）。done 確定と同じ batch で committed=1。
+--   確定されずに残った記録（取消・所有権喪失・書込み後の例外や中断）は Cron が R2 から削除して消す＝孤立オブジェクトを残さない。
 -- ※ 未適用の段階で lease_until を追加済み（2026-09-28 CODEX レビュー）。以後は追記 migration（K004〜）のみ。
 CREATE TABLE IF NOT EXISTS line_media (
   line_message_id  TEXT PRIMARY KEY,
@@ -30,9 +31,16 @@ CREATE TABLE IF NOT EXISTS line_media (
   r2_deleted       INTEGER NOT NULL DEFAULT 0,
   lease_until      INTEGER,
   lease_token      TEXT,
-  orphan_key       TEXT,
   updated_at       INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_line_media_due ON line_media (status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_line_media_unmirrored ON line_media (mirrored, mirror_attempts);
+
+CREATE TABLE IF NOT EXISTS line_media_writes (
+  r2_key          TEXT PRIMARY KEY,
+  line_message_id TEXT NOT NULL,
+  committed       INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_line_media_writes_uncommitted ON line_media_writes (committed, created_at);
