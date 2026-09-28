@@ -66,17 +66,21 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
    確認: `whtest 503`（`success=false`・`statusCode=503`）。管理画面・LIFF も 503 になる（本手順の Worker は `WEBHOOK_MAINTENANCE=1` で /webhook 以外を全て 503 にする＝移行中の書き込みを作らない）。
 2. **退避・③migration・④後処理・⑤検証ゲート** — 一括スクリプト（最初の失敗で全体停止）
    `bash ../../scripts/craval-apply-v024.sh $T`（マイルを使う判断なら `--keep-mileage`）
-   内容: 未適用確認 → bookmark＋export → 事前件数 → 本家 046〜072 → マイル停止 → 事後件数一致（chats は重複統合分だけ減ってよい）→ `craval-d1-gate.mjs`。
+   内容: 未適用確認 → **静止確認**（メンテ前から動いていた処理の書き込みが止むまで 60 秒おきに確認・最大 15 分）→ bookmark＋export → 事前件数 → 本家 046〜072 → マイル停止 → 事後件数一致（chats は重複統合分だけ減ってよい）→ `craval-d1-gate.mjs`。
 3. **メンテ解除で新 Worker をデプロイ**
    `npx wrangler deploy -c wrangler.$T.toml` → `whtest 200`（`success=true`・`statusCode=200`）。
 4. **管理画面を v0.24 で作り直す**（旧画面は localStorage 認証なので新 Worker ではログインできない）
    ```bash
    printf 'https://line-harness-%s-admin.pages.dev' $T | npx wrangler secret put ADMIN_ORIGIN -c wrangler.$T.toml   # 念のため再設定
-   cd ../web && rm -rf out .next && NEXT_PUBLIC_API_URL=https://line-harness-$T.craval.workers.dev NEXT_PUBLIC_UPDATE_BANNER_ENABLED=false npx next build
-   # 内容で検査し、他テナントの URL が1つでもあればここで止める（apps/web/.env.production は sbo の URL なので env で必ず上書き）
-   grep -rqF "line-harness-$T.craval.workers.dev" out || { echo "NG: 自テナント URL が無い"; false; }
-   for o in kzn sbo fzk; do [ $o = $T ] && continue; if grep -rqF "line-harness-$o" out; then echo "NG: $o の URL が混入"; false; fi; done
-   npx wrangler pages deploy out --project-name=line-harness-$T-admin --branch=main --commit-dirty=true
+   # 検査とデプロイを set -e の一塊で実行＝他テナントの URL が1つでもあればデプロイせず終了
+   #（apps/web/.env.production は sbo の URL なので env で必ず上書き）
+   bash -euo pipefail -c '
+     T=$1; cd ../web && rm -rf out .next
+     NEXT_PUBLIC_API_URL=https://line-harness-$T.craval.workers.dev NEXT_PUBLIC_UPDATE_BANNER_ENABLED=false npx next build
+     grep -rqF "line-harness-$T.craval.workers.dev" out || { echo "NG: 自テナント URL が無い"; exit 1; }
+     for o in kzn sbo fzk; do [ "$o" = "$T" ] && continue; if grep -rqF "line-harness-$o" out; then echo "NG: $o の URL が混入"; exit 1; fi; done
+     npx wrangler pages deploy out --project-name=line-harness-$T-admin --branch=main --commit-dirty=true
+   ' _ "$T"
    ```
    確認: 管理画面に API_KEY でログインできる（Chrome）。
 5. **（fzk のみ）LIFF を v0.24 で作り直す**

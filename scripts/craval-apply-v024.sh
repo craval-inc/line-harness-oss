@@ -37,6 +37,20 @@ if d1 --json --command "SELECT name FROM sqlite_master WHERE type='table' AND na
   echo "NG: 046 以降が既に適用済み（affiliate_links / mileage_rules が存在）。手順書の「途中から再開」を参照"; exit 1
 fi
 
+step "①' 静止確認（メンテ前から動いていた API・Cron・waitUntil の書き込みが止んだことを確認してから退避）"
+# Worker の実行は最大でも数分で終わる。書き込み指標（主要テーブルの件数と最新時刻）が 60 秒おき 3 回連続で同じになるまで待つ。
+QUIET_SQL="SELECT (SELECT COUNT(*) FROM friends)||'/'||(SELECT COUNT(*) FROM messages_log)||'/'||(SELECT COUNT(*) FROM chats)||'/'||(SELECT COUNT(*) FROM friend_scenarios)||'/'||(SELECT COUNT(*) FROM account_health_logs)||'/'||COALESCE((SELECT MAX(created_at) FROM account_health_logs),'')||'/'||COALESCE((SELECT MAX(created_at) FROM messages_log),'')||'/'||COALESCE((SELECT MAX(updated_at) FROM friends),'') AS sig"
+prev=""; same=0
+for i in $(seq 1 15); do
+  sig=$(d1 --json --command "$QUIET_SQL" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log((Array.isArray(j)?j[0]:j).results[0].sig)})')
+  echo "  [$i] $sig"
+  if [ "$sig" = "$prev" ]; then same=$((same+1)); else same=0; fi
+  prev="$sig"
+  [ "$same" -ge 2 ] && break
+  sleep 60
+done
+[ "$same" -ge 2 ] || { echo "NG: 15 分待っても書き込みが止まらない（メンテ前の処理が走り続けている）。退避せず中止"; exit 1; }
+
 step "② 退避: time-travel bookmark と export"
 npx wrangler d1 time-travel info "$DB" -c "$CFG" | tee "$OUT/bookmark.txt"
 npx wrangler d1 export "$DB" --remote -c "$CFG" --output="$OUT/$TENANT-before-v024.sql"
