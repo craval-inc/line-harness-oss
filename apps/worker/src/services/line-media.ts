@@ -229,8 +229,14 @@ async function readLimited(res: Response, maxBytes: number): Promise<Uint8Array 
 
 /** 取得の排他期限（Content API 20秒＋R2 書込の余裕）。期限切れなら別の実行が取り直せる。 */
 export const MEDIA_LEASE_MS = 2 * 60 * 1000;
-/** 未確定の先行ログを回収するまでの猶予。実行中（遅い取得・書込み）のオブジェクトを消さないよう、取得権より十分長く取る。 */
+/** 未確定の先行ログを回収に回すまでの猶予（取得権より十分長く）。回収と確定は DB 上で排他（下記 WAL_* 状態）。 */
 export const MEDIA_WAL_GRACE_MS = 30 * 60 * 1000;
+/** 回収中の記録を残して R2 削除をやり直し続ける期間（遅延した put が後から完了しても消せるように）。 */
+export const MEDIA_WAL_TOMBSTONE_MS = 7 * 24 * 60 * 60 * 1000;
+/** line_media_writes.committed の状態。0=書込み中 / 1=確定済み（DB が参照）/ 2=回収中（確定不可・R2 から削除し続ける）。 */
+export const WAL_PENDING = 0;
+export const WAL_COMMITTED = 1;
+export const WAL_RECLAIMING = 2;
 
 /**
  * 1 件取得して保存する。取得待ち（pending）で、他の実行が取得中（lease 有効）でない行だけが対象。
@@ -312,14 +318,16 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
       .prepare(
         `UPDATE line_media SET status = 'done', r2_key = ?, content_type = ?, size = ?, reason = NULL,
                 mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
-          WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
+          WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?
+            AND EXISTS (SELECT 1 FROM line_media_writes WHERE r2_key = ? AND committed = ${WAL_PENDING})`,
       )
-      .bind(key, contentType, bytes.byteLength, now(), row.line_message_id, token),
-    // 確定できた時だけ先行ログを確定済みにする（同じトランザクション）。
+      .bind(key, contentType, bytes.byteLength, now(), row.line_message_id, token, key),
+    // 確定できた時だけ先行ログを確定済みにする（同じトランザクション）。回収中（2）になっていたら上の UPDATE も効かない＝排他。
     db
       .prepare(
-        `UPDATE line_media_writes SET committed = 1
-          WHERE r2_key = ? AND EXISTS (SELECT 1 FROM line_media WHERE line_message_id = ? AND r2_key = ? AND status = 'done')`,
+        `UPDATE line_media_writes SET committed = ${WAL_COMMITTED}
+          WHERE r2_key = ? AND committed = ${WAL_PENDING}
+            AND EXISTS (SELECT 1 FROM line_media WHERE line_message_id = ? AND r2_key = ? AND status = 'done')`,
       )
       .bind(key, row.line_message_id, key),
   ]);
@@ -332,11 +340,18 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
   return cur?.status === 'unsent' ? 'unsent' : 'skipped';
 }
 
-/** 確定されなかった書込みを R2 から消し、先行ログも消す。失敗時はログを残す（Cron が再試行）。 */
+/**
+ * 確定されなかった書込みを回収する: 先行ログを「回収中」にしてから R2 を消す（記録は残す＝Cron が期間中は消し直す）。
+ * 確定済み（1）の記録には触れない。回収中へ切り替えられなければ（確定済みだった等）何もしない。
+ */
 async function discardWrite(db: D1Database, r2: R2Bucket, key: string, lineMessageId: string): Promise<boolean> {
+  const mark = await db
+    .prepare(`UPDATE line_media_writes SET committed = ${WAL_RECLAIMING} WHERE r2_key = ? AND committed IN (${WAL_PENDING}, ${WAL_RECLAIMING})`)
+    .bind(key)
+    .run();
+  if ((mark.meta?.changes ?? 0) === 0) return false;
   try {
     await r2.delete(key);
-    await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ? AND committed = 0`).bind(key).run();
     return true;
   } catch (err) {
     console.error(`[line-media] discard write failed msg=${lineMessageId}: ${err instanceof Error ? err.name : 'error'}`);
@@ -351,21 +366,38 @@ export async function purgeUnsentMedia(db: D1Database, r2: R2Bucket, now: number
     .bind(limit)
     .all<{ line_message_id: string; r2_key: string }>();
   let n = 0;
-  // 確定されずに残った先行ログ（猶予 30 分を過ぎたもの）: DB が参照していれば確定済みに、していなければ R2 から消す。
-  const stale = await db
-    .prepare(
-      `SELECT w.r2_key, w.line_message_id, (m.r2_key = w.r2_key AND m.status = 'done') AS referenced
-         FROM line_media_writes w LEFT JOIN line_media m ON m.line_message_id = w.line_message_id
-        WHERE w.committed = 0 AND w.created_at <= ? LIMIT ?`,
-    )
-    .bind(now - MEDIA_WAL_GRACE_MS, limit)
-    .all<{ r2_key: string; line_message_id: string; referenced: number | null }>();
-  for (const w of stale.results ?? []) {
-    if (w.referenced) {
-      await db.prepare(`UPDATE line_media_writes SET committed = 1 WHERE r2_key = ?`).bind(w.r2_key).run();
-      continue;
+  // 先行ログの回収（DB 上で確定と排他）:
+  //  ① 猶予を過ぎた書込み中（0）で DB が参照しているもの → 確定済み（1）
+  //  ② 猶予を過ぎた書込み中（0）で参照されていないもの → 回収中（2）へ原子的に切替（以後、確定 UPDATE は効かない）
+  //  ③ 回収中（2）は期間中、毎回 R2 から削除し直す（遅れて完了した put も消す）。期間を過ぎたら記録を消す
+  const cutoff = now - MEDIA_WAL_GRACE_MS;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE line_media_writes SET committed = ${WAL_COMMITTED}
+          WHERE committed = ${WAL_PENDING} AND created_at <= ?
+            AND EXISTS (SELECT 1 FROM line_media m WHERE m.line_message_id = line_media_writes.line_message_id
+                          AND m.r2_key = line_media_writes.r2_key AND m.status = 'done')`,
+      )
+      .bind(cutoff),
+    db
+      .prepare(`UPDATE line_media_writes SET committed = ${WAL_RECLAIMING} WHERE committed = ${WAL_PENDING} AND created_at <= ?`)
+      .bind(cutoff),
+  ]);
+  const reclaiming = await db
+    .prepare(`SELECT r2_key, line_message_id, created_at FROM line_media_writes WHERE committed = ${WAL_RECLAIMING} ORDER BY created_at ASC LIMIT ?`)
+    .bind(limit)
+    .all<{ r2_key: string; line_message_id: string; created_at: number }>();
+  for (const w of reclaiming.results ?? []) {
+    try {
+      await r2.delete(w.r2_key);
+      if (w.created_at <= now - MEDIA_WAL_TOMBSTONE_MS) {
+        await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ? AND committed = ${WAL_RECLAIMING}`).bind(w.r2_key).run();
+      }
+      n++;
+    } catch (err) {
+      console.error(`[line-media] reclaim failed msg=${w.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
     }
-    if (await discardWrite(db, r2, w.r2_key, w.line_message_id)) n++;
   }
   for (const r of rows.results ?? []) {
     try {

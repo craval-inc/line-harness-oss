@@ -18,6 +18,7 @@ import {
   MAX_MEDIA_BYTES,
   MEDIA_RETRY_SCHEDULE_MS,
   MEDIA_WAL_GRACE_MS,
+  MEDIA_WAL_TOMBSTONE_MS,
 } from './line-media.js';
 
 const USER = 'U0000000000000000000000000000media';
@@ -335,13 +336,12 @@ describe('CODEX レビュー反映（並行・準備中・取消後の削除失�
     });
     expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
     expect(r2.objects.size).toBe(1);
-    expect(q('SELECT committed FROM line_media_writes')).toEqual([{ committed: 0 }]);
+    // 自分の put は完了済み＝回収中（2）にしてから消す。削除失敗でも記録は回収中のまま残る
+    expect(q('SELECT committed FROM line_media_writes')).toEqual([{ committed: 2 }]);
     failDelete = false;
-    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 60_000)).toBe(0); // 猶予内は消さない（実行中の可能性）
-    expect(r2.objects.size).toBe(1);
-    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS + 1)).toBe(1);
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 60_000)).toBe(1); // 回収中は猶予を待たずに消し直す
     expect(r2.objects.size).toBe(0);
-    expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(0);
+    expect(q('SELECT committed FROM line_media_writes')).toEqual([{ committed: 2 }]); // 7日間は記録を残す
   });
 
   test('取得中に取消 → R2 削除に失敗しても先行ログが残り、猶予後に Cron が回収', async () => {
@@ -382,5 +382,42 @@ describe('CODEX レビュー反映（並行・準備中・取消後の削除失�
     await save([media('m1')]);
     await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1');
     expect((await getMediaRow(db.asD1(), 'm1'))!.r2_key).toMatch(/\/m1-[0-9a-f]{32}\.jpg$/);
+  });
+
+  test('回収と確定は DB 上で排他: 回収中（2）に切り替わった後の確定は効かず、自分の書込みを消す', async () => {
+    await save([media('m1')]);
+    const fetchFn = vi.fn(async () => {
+      // 取得中に猶予が過ぎ、Cron が先行ログを回収中にした（遅い実行）
+      return contentResponse(8);
+    });
+    // put の直前に Cron が回収に回す状況を作る: r2.put をフックして、書込み直後に回収中へ切り替える
+    const origPut = r2.put.bind(r2);
+    r2.put = async (k: string, v: Uint8Array, o?: { httpMetadata?: { contentType?: string } }) => {
+      await origPut(k, v, o);
+      db.raw.prepare('UPDATE line_media_writes SET committed = 2 WHERE r2_key = ?').run(k);
+      return {};
+    };
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
+    expect(q('SELECT status FROM line_media')[0].status).toBe('pending'); // done にならない
+    expect(r2.objects.size).toBe(0); // 自分の書込みは消した
+  });
+
+  test('確定が先なら回収は何もしない（確定済み 1 は回収対象外）', async () => {
+    await save([media('m1')]);
+    expect(await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1')).toBe('done');
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS * 10)).toBe(0);
+    expect(r2.objects.size).toBe(1);
+  });
+
+  test('回収後に遅れて put が完了しても、回収中の記録が残る間は Cron が消し直す・7日後に記録を消す', async () => {
+    await save([media('m1')]);
+    db.raw.prepare("INSERT INTO line_media_writes (r2_key, line_message_id, committed, created_at) VALUES ('line-media/x/m1-late.jpg', 'm1', 0, ?)").run(T0);
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS + 1)).toBe(1); // 回収中へ→削除（まだ無い）
+    r2.objects.set('line-media/x/m1-late.jpg', { body: new Uint8Array(1) }); // 遅れて put が完了
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS + 10);
+    expect(r2.objects.has('line-media/x/m1-late.jpg')).toBe(false);
+    expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(1);
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_TOMBSTONE_MS + 1);
+    expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(0);
   });
 });
