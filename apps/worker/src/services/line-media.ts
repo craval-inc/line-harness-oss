@@ -72,9 +72,11 @@ export function extFor(contentType: string | null, fileName: string | null | und
   return fromName ?? 'bin';
 }
 
-export function mediaKey(hash: string, messageId: string, ext: string): string {
+/** 実行（取得権）ごとに一意なキー。別の実行と同じキーを書かない＝所有権を失った実行が自分の書込みだけを安全に消せる。 */
+export function mediaKey(hash: string, messageId: string, ext: string, attemptTag: string): string {
   const safeId = messageId.replace(/[^0-9A-Za-z]/g, '_');
-  return `line-media/${hash}/${safeId}.${ext}`;
+  const tag = attemptTag.replace(/[^0-9a-f]/gi, '').slice(0, 8).toLowerCase();
+  return `line-media/${hash}/${safeId}-${tag}.${ext}`;
 }
 
 /** 保存 batch に入れる line_media 登録文。メディアでない・ID 欠落なら null。取消済み・外部提供は即確定。 */
@@ -167,35 +169,35 @@ function trimReason(r: string): string {
 }
 
 /** 期限切れ・取得不能（確定）。 */
-async function markExpired(db: D1Database, id: string, reason: string, now: number): Promise<void> {
+async function markExpired(db: D1Database, id: string, reason: string, now: number, token: string): Promise<void> {
   await db
     .prepare(
-      `UPDATE line_media SET status = 'expired', reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
-        WHERE line_message_id = ? AND status = 'pending'`,
+      `UPDATE line_media SET status = 'expired', reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
+        WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
     )
-    .bind(trimReason(reason), now, id)
+    .bind(trimReason(reason), now, id, token)
     .run();
 }
 
 /** 一時失敗: 試行回数を進め、次の予定時刻を入れる。使い切ったら failed（確定）。 */
-async function markRetry(db: D1Database, row: MediaRow, reason: string, now: number): Promise<MediaStatus> {
+async function markRetry(db: D1Database, row: MediaRow, reason: string, now: number, token: string): Promise<MediaStatus> {
   const nextAttempt = row.attempts + 1;
   if (nextAttempt >= MEDIA_RETRY_SCHEDULE_MS.length) {
     await db
       .prepare(
-        `UPDATE line_media SET status = 'failed', attempts = ?, reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
-          WHERE line_message_id = ? AND status = 'pending'`,
+        `UPDATE line_media SET status = 'failed', attempts = ?, reason = ?, mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
+          WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
       )
-      .bind(nextAttempt, trimReason(reason), now, row.line_message_id)
+      .bind(nextAttempt, trimReason(reason), now, row.line_message_id, token)
       .run();
     return 'failed';
   }
   await db
     .prepare(
-      `UPDATE line_media SET attempts = ?, reason = ?, next_attempt_at = ?, lease_until = NULL, updated_at = ?
-        WHERE line_message_id = ? AND status = 'pending'`,
+      `UPDATE line_media SET attempts = ?, reason = ?, next_attempt_at = ?, lease_until = NULL, lease_token = NULL, updated_at = ?
+        WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
     )
-    .bind(nextAttempt, trimReason(reason), row.received_at + MEDIA_RETRY_SCHEDULE_MS[nextAttempt], now, row.line_message_id)
+    .bind(nextAttempt, trimReason(reason), row.received_at + MEDIA_RETRY_SCHEDULE_MS[nextAttempt], now, row.line_message_id, token)
     .run();
   return 'pending';
 }
@@ -237,13 +239,15 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
   const fetchFn = deps.fetchFn ?? fetch;
   const { db } = deps;
   // 排他: Webhook 直後の取得と Cron が同じ行を同時に取らない（並行取得で正常なオブジェクトを消す事故の防止）。
+  // 状態の確定は lease_token が一致する所有者だけ（期限切れ後に別の実行が取り直したら、元の実行は確定できない）。
   const t0 = now();
+  const token = crypto.randomUUID().replace(/-/g, '');
   const claim = await db
     .prepare(
-      `UPDATE line_media SET lease_until = ?, updated_at = ?
+      `UPDATE line_media SET lease_until = ?, lease_token = ?, updated_at = ?
         WHERE line_message_id = ? AND status = 'pending' AND (lease_until IS NULL OR lease_until <= ?)`,
     )
-    .bind(t0 + MEDIA_LEASE_MS, t0, lineMessageId, t0)
+    .bind(t0 + MEDIA_LEASE_MS, token, t0, lineMessageId, t0)
     .run();
   if ((claim.meta?.changes ?? 0) === 0) return 'skipped';
   const row = await getMediaRow(db, lineMessageId);
@@ -256,79 +260,91 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
       signal: AbortSignal.timeout(20_000),
     });
   } catch (err) {
-    return markRetry(db, row, `fetch: ${err instanceof Error ? err.name : 'error'}`, now());
+    return markRetry(db, row, `fetch: ${err instanceof Error ? err.name : 'error'}`, now(), token);
   }
   if (res.status === 404 || res.status === 410) {
     await res.body?.cancel().catch(() => {});
-    await markExpired(db, row.line_message_id, `gone_${res.status}`, now());
+    await markExpired(db, row.line_message_id, `gone_${res.status}`, now(), token);
     return 'expired';
   }
   // 202 = 動画・音声の変換準備中（本文は空）。保存せず再試行。200 以外は全て一時失敗扱い。
   if (res.status !== 200) {
     await res.body?.cancel().catch(() => {});
-    return markRetry(db, row, res.status === 202 ? 'preparing' : `http_${res.status}`, now());
+    return markRetry(db, row, res.status === 202 ? 'preparing' : `http_${res.status}`, now(), token);
   }
   const declared = Number(res.headers.get('Content-Length') ?? '0');
   if (declared > MAX_MEDIA_BYTES) {
     await res.body?.cancel().catch(() => {});
-    await markExpired(db, row.line_message_id, 'too_large', now());
+    await markExpired(db, row.line_message_id, 'too_large', now(), token);
     return 'expired';
   }
   let bytes: Uint8Array | null;
   try {
     bytes = await readLimited(res, MAX_MEDIA_BYTES);
   } catch (err) {
-    return markRetry(db, row, `read: ${err instanceof Error ? err.name : 'error'}`, now());
+    return markRetry(db, row, `read: ${err instanceof Error ? err.name : 'error'}`, now(), token);
   }
   if (bytes === null) {
-    await markExpired(db, row.line_message_id, 'too_large', now());
+    await markExpired(db, row.line_message_id, 'too_large', now(), token);
     return 'expired';
   }
 
   const contentType = (res.headers.get('Content-Type') ?? 'application/octet-stream').split(';')[0].trim().toLowerCase();
-  const key = mediaKey(row.user_hash, row.line_message_id, extFor(contentType, row.file_name));
+  const key = mediaKey(row.user_hash, row.line_message_id, extFor(contentType, row.file_name), token);
   try {
     await deps.r2.put(key, bytes, { httpMetadata: { contentType } });
   } catch (err) {
-    return markRetry(db, row, `r2: ${err instanceof Error ? err.name : 'error'}`, now());
+    return markRetry(db, row, `r2: ${err instanceof Error ? err.name : 'error'}`, now(), token);
   }
   const upd = await db
     .prepare(
       `UPDATE line_media SET status = 'done', r2_key = ?, content_type = ?, size = ?, reason = NULL,
-              mirrored = 0, mirror_attempts = 0, lease_until = NULL, updated_at = ?
-        WHERE line_message_id = ? AND status = 'pending'`,
+              mirrored = 0, mirror_attempts = 0, lease_until = NULL, lease_token = NULL, updated_at = ?
+        WHERE line_message_id = ? AND status = 'pending' AND lease_token = ?`,
     )
-    .bind(key, contentType, bytes.byteLength, now(), row.line_message_id)
+    .bind(key, contentType, bytes.byteLength, now(), row.line_message_id, token)
     .run();
   if ((upd.meta?.changes ?? 0) === 1) return 'done';
 
-  // 更新できなかった: 取消された時だけ、書いたオブジェクトを消す（他の実行が done にした場合は同じキーなので消さない）。
-  const cur = await getMediaRow(db, row.line_message_id);
-  if (cur?.status !== 'unsent') return 'skipped';
-  // 削除に失敗しても Cron（purgeUnsentMedia）が拾えるよう、先にキーを記録してから消す。
-  await db
-    .prepare(`UPDATE line_media SET r2_key = ?, r2_deleted = 0, updated_at = ? WHERE line_message_id = ? AND status = 'unsent'`)
-    .bind(key, now(), row.line_message_id)
-    .run();
+  // 確定できなかった（取消された・期限切れ後に別の実行が取り直した）: このキーは実行ごとに一意で DB のどこからも
+  // 参照されない＝自分の書込みを消す。削除に失敗したら orphan_key に記録し、Cron（purgeUnsentMedia）が消す。
   try {
     await deps.r2.delete(key);
-    await db
-      .prepare(`UPDATE line_media SET r2_deleted = 1, r2_key = NULL, updated_at = ? WHERE line_message_id = ? AND status = 'unsent'`)
-      .bind(now(), row.line_message_id)
-      .run();
   } catch (err) {
-    console.error(`[line-media] delete after unsend failed msg=${row.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
+    console.error(`[line-media] delete own write failed msg=${row.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
+    const rec = await db
+      .prepare(`UPDATE line_media SET orphan_key = ?, updated_at = ? WHERE line_message_id = ? AND orphan_key IS NULL`)
+      .bind(key, now(), row.line_message_id)
+      .run();
+    if ((rec.meta?.changes ?? 0) === 0) console.error(`[line-media] orphan slot busy msg=${row.line_message_id} (manual cleanup needed)`);
   }
-  return 'unsent';
+  const cur = await getMediaRow(db, row.line_message_id);
+  return cur?.status === 'unsent' ? 'unsent' : 'skipped';
 }
 
-/** 取消済みで保存済みのオブジェクトを R2 から消す。 */
+/** 取消済みで保存済みのオブジェクトと、所有権を失った実行の書き残し（orphan_key）を R2 から消す。 */
 export async function purgeUnsentMedia(db: D1Database, r2: R2Bucket, now: number, limit = 20): Promise<number> {
   const rows = await db
     .prepare(`SELECT line_message_id, r2_key FROM line_media WHERE status = 'unsent' AND r2_key IS NOT NULL AND r2_deleted = 0 LIMIT ?`)
     .bind(limit)
     .all<{ line_message_id: string; r2_key: string }>();
   let n = 0;
+  const orphans = await db
+    .prepare(`SELECT line_message_id, orphan_key FROM line_media WHERE orphan_key IS NOT NULL LIMIT ?`)
+    .bind(limit)
+    .all<{ line_message_id: string; orphan_key: string }>();
+  for (const o of orphans.results ?? []) {
+    try {
+      await r2.delete(o.orphan_key);
+      await db
+        .prepare(`UPDATE line_media SET orphan_key = NULL, updated_at = ? WHERE line_message_id = ? AND orphan_key = ?`)
+        .bind(now, o.line_message_id, o.orphan_key)
+        .run();
+      n++;
+    } catch (err) {
+      console.error(`[line-media] orphan purge failed msg=${o.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
+    }
+  }
   for (const r of rows.results ?? []) {
     try {
       await r2.delete(r.r2_key);

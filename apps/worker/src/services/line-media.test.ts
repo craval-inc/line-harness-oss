@@ -141,7 +141,7 @@ describe('取得と保存', () => {
     expect(out).toBe('done');
     const row = await getMediaRow(db.asD1(), '100001');
     expect(row).toMatchObject({ status: 'done', content_type: 'image/jpeg', size: 1234 });
-    expect(row!.r2_key).toMatch(/^line-media\/[0-9a-f]{16}\/100001\.jpg$/);
+    expect(row!.r2_key).toMatch(/^line-media\/[0-9a-f]{16}\/100001-[0-9a-f]{8}\.jpg$/);
     expect(row!.r2_key).not.toContain(USER);
     expect(r2.objects.get(row!.r2_key!)?.contentType).toBe('image/jpeg');
     expect(q('SELECT mirrored FROM line_media')[0].mirrored).toBe(0);
@@ -150,7 +150,7 @@ describe('取得と保存', () => {
   test('ファイルは Content-Type が汎用でもファイル名の拡張子を使う', async () => {
     await save([media('100002', 'file', { fileName: 'doc.PDF' })]);
     await fetchLineMedia(deps(vi.fn(async () => contentResponse(10, 'application/octet-stream')) as never), '100002');
-    expect((await getMediaRow(db.asD1(), '100002'))!.r2_key).toMatch(/100002\.pdf$/);
+    expect((await getMediaRow(db.asD1(), '100002'))!.r2_key).toMatch(/100002-[0-9a-f]{8}\.pdf$/);
   });
 
   test.each([404, 410])('%s は取得不能で確定（再試行しない）', async (status) => {
@@ -311,15 +311,34 @@ describe('CODEX レビュー反映（並行・準備中・取消後の削除失�
     expect(await fetchLineMedia(deps(vi.fn(async () => contentResponse(3)) as never), 'm1')).toBe('done');
   });
 
-  test('done に他の実行が先に更新していても、同じキーのオブジェクトは消さない', async () => {
+  test('期限切れ後に別の実行が確定させた → 元の実行は確定できず、自分の書込み（実行ごとに一意なキー）だけを消す', async () => {
     await save([media('m1')]);
     const fetchFn = vi.fn(async () => {
-      // 取得中に別経路が done にした（lease を無視した旧実行など）
-      db.raw.prepare("UPDATE line_media SET status='done', r2_key='line-media/x/m1.jpg' WHERE line_message_id='m1'").run();
+      // 取得中に lease が切れ、別の実行が取り直して確定した（token が変わる）
+      db.raw.prepare("UPDATE line_media SET status='done', r2_key='line-media/x/m1-aaaaaaaa.jpg', lease_token=NULL WHERE line_message_id='m1'").run();
+      r2.objects.set('line-media/x/m1-aaaaaaaa.jpg', { body: new Uint8Array(1) });
       return contentResponse(8);
     });
     expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
-    expect(r2.objects.size).toBe(1); // 書いたものは残す（削除しない）
+    expect([...r2.objects.keys()]).toEqual(['line-media/x/m1-aaaaaaaa.jpg']); // 他の実行の保存は残し、自分の書込みは消えた
+  });
+
+  test('期限切れ後に別の実行が failed で確定 → 元の実行の書込みを消す・削除失敗は orphan_key で Cron が回収', async () => {
+    await save([media('m1')]);
+    const origDelete = r2.delete.bind(r2);
+    let failDelete = true;
+    r2.delete = async (k: string) => { if (failDelete) throw new Error('down'); return origDelete(k); };
+    const fetchFn = vi.fn(async () => {
+      db.raw.prepare("UPDATE line_media SET status='failed', lease_token=NULL WHERE line_message_id='m1'").run();
+      return contentResponse(8);
+    });
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
+    expect(r2.objects.size).toBe(1);
+    expect(q('SELECT status, orphan_key IS NOT NULL AS has_orphan FROM line_media')[0]).toMatchObject({ status: 'failed', has_orphan: 1 });
+    failDelete = false;
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 2)).toBe(1);
+    expect(r2.objects.size).toBe(0);
+    expect(q('SELECT orphan_key FROM line_media')[0].orphan_key).toBe(null);
   });
 
   test('取得中に取消 → R2 削除に失敗してもキーを記録し、Cron の削除で消える', async () => {
@@ -330,7 +349,7 @@ describe('CODEX レビュー反映（並行・準備中・取消後の削除失�
     const fetchFn = vi.fn(async () => { await applyUnsend(db.asD1(), 'm1', T0 + 1); return contentResponse(8); });
     expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('unsent');
     expect(r2.objects.size).toBe(1);
-    expect(q('SELECT r2_key IS NOT NULL AS has_key, r2_deleted FROM line_media')[0]).toMatchObject({ has_key: 1, r2_deleted: 0 });
+    expect(q('SELECT orphan_key IS NOT NULL AS has_orphan FROM line_media')[0]).toMatchObject({ has_orphan: 1 });
     failDelete = false;
     expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 2)).toBe(1);
     expect(r2.objects.size).toBe(0);

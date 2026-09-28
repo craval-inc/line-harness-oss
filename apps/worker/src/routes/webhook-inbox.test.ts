@@ -816,7 +816,7 @@ describe('[kzn] LINE_MEDIA_STORE: 受信直後のメディア保全（webhook �
       const order = calls.map((c) => (c.body ? `mirror:${c.body.eventType}:${c.body.mediaStatus ?? ''}` : 'content'));
       expect(order).toEqual(['mirror:message:pending', 'content', 'mirror:media:done']);
       expect(calls[0].body).not.toHaveProperty('mediaKey');
-      expect(calls[2].body!.mediaKey).toMatch(/^line-media\/[0-9a-f]{16}\/900001\.png$/);
+      expect(calls[2].body!.mediaKey).toMatch(/^line-media\/[0-9a-f]{16}\/900001-[0-9a-f]{8}\.png$/);
       expect(objects.size).toBe(1);
       expect([...objects.keys()][0]).not.toContain(USER);
     } finally {
