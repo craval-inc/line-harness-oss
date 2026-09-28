@@ -1,0 +1,58 @@
+name = "line-harness-fzk"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+# nodejs_compat is required by @line-harness/update-engine (node:stream/zlib/crypto + tar-stream).
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# ═══════════════════════════════════════════════════════════════
+# Craval — 附属家庭教師フゾカテ（fzk） テナント（本家 v0.24 + Craval セキュリティ修正のみ）
+# Account: 48cf2f856a84ba4baca7b9e4484b50c1（cf-craval）
+# 使い方: node ../../scripts/check-craval-target.mjs fzk && npx wrangler deploy -c wrangler.fzk.toml
+# ※ kzn 専用の env（WEBHOOK_INBOX / LINE_SEND_DISABLED / EVENT_BUS_DISABLED / MIRROR_* / PUBLIC_PATHS_ALLOW /
+#    INCOMING_IMAGE_STORE / LINE_MEDIA_* / KIZUNA_*）は入れない＝本家の受信・配信挙動のまま。
+# ※ 値は 2026-09-28 時点の本番 Worker（line-harness-fzk）の設定から転記。secret は wrangler secret で既存のまま。
+# ※ WEBHOOK_MAINTENANCE は D1 移行中だけ `--var WEBHOOK_MAINTENANCE:1` で渡す（toml に書かない）。
+# ═══════════════════════════════════════════════════════════════
+account_id = "48cf2f856a84ba4baca7b9e4484b50c1"
+
+# 本家 production と同じく Cache API は無効（認証分離が検証されるまで）。
+[cache]
+enabled = false
+
+[assets]
+directory = "dist/client"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "line-harness-fzk"
+database_id = "d85dd5d0-7bc3-43ea-8f8a-a4eda6d82709"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "line-harness-fzk-images"
+
+# 本家 v0.24 の Durable Object 定期実行（TENANT_SCHEDULER・毎分）は使わない＝現行どおり Cron 5分/6時間。
+# （バインディング省略時は DO 経路は何もしない。scheduled.ts が Cron から同じ処理を回す）
+[triggers]
+crons = ["*/5 * * * *", "0 */6 * * *"]
+
+[vars]
+WORKER_NAME = "line-harness-fzk"
+ADMIN_PAGES_PROJECT = "line-harness-fzk-admin"
+LIFF_PAGES_PROJECT = "line-harness-fzk-liff"
+D1_DATABASE_ID = "d85dd5d0-7bc3-43ea-8f8a-a4eda6d82709"
+# 本家からの自動アップデートは無効（M-2・セキュリティ方針）。
+MANIFEST_URL = ""
+WORKER_PUBLIC_URL = "https://line-harness-fzk.craval.workers.dev"
+ADMIN_PUBLIC_URL = "https://line-harness-fzk-admin.pages.dev"
+LIFF_PUBLIC_URL = "https://line-harness-fzk-liff.pages.dev"
+CF_ACCOUNT_ID = "48cf2f856a84ba4baca7b9e4484b50c1"
+# 本家 v0.24 の管理画面は httpOnly Cookie 認証。管理画面(*.pages.dev)と Worker(*.workers.dev)は別サイトなので
+# SameSite=None Cookie が必要（Safari 不可・Chrome 可）。ADMIN_ORIGIN（secret・既存）は管理画面 URL と一致させる。
+ADMIN_ALLOW_CROSS_SITE = "true"
+
+# 既存 secret（変更しない）: LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_ID /
+#   LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET / LIFF_URL / API_KEY / ADMIN_API_KEY / WORKER_URL / ADMIN_ORIGIN
