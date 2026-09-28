@@ -10,6 +10,15 @@
  *   （古いイベント・処理中の割り込み・友だち未登録の unfollow でも状態を巻き戻さない）。
  */
 import type { WebhookEvent } from '@line-crm/line-sdk';
+import {
+  lineMediaEnabled,
+  mediaInsertStatement,
+  mediaUnsendStatement,
+  getMediaRow,
+  mediaMirrorFields,
+  MEDIA_MESSAGE_TYPES,
+  type MediaMirrorFields,
+} from './line-media.js';
 
 export const UNSENT_PLACEHOLDER = '[送信取消]';
 export const MAX_ATTEMPTS = 5;
@@ -119,6 +128,13 @@ export async function saveInboxEvents(
         opts.now,
       );
   });
+  // [Craval kzn] LINE_MEDIA_STORE: メディアの取得待ちを同じトランザクションで登録（取得は保存の後）。
+  if (lineMediaEnabled()) {
+    for (const e of tracked) {
+      const st = await mediaInsertStatement(db, e, { lineAccountId: opts.lineAccountId, now: opts.now });
+      if (st) stmts.push(st);
+    }
+  }
   // unsend は保存と同じトランザクションで取消を登録し、既存の本文（受信箱・受信ログ）を伏せる。
   // 並行リクエストでも D1 の batch は直列化されるので、元メッセージの保存と取消のどちらが先でも本文は残らない。
   for (const e of tracked) {
@@ -170,7 +186,9 @@ export async function applyUnsend(db: D1Database, lineMessageId: string, now: nu
 
 /** 取消登録と本文置換の文（冪等）。受信箱の保存 batch にも同じ文を入れる。 */
 function unsendStatements(db: D1Database, lineMessageId: string, now: number): D1PreparedStatement[] {
+  const media = lineMediaEnabled() ? [mediaUnsendStatement(db, lineMessageId, now)] : [];
   return [
+    ...media,
     db.prepare('INSERT OR IGNORE INTO unsent_messages (line_message_id, unsent_at) VALUES (?, ?)').bind(lineMessageId, now),
     db.prepare('UPDATE messages_log SET content = ? WHERE line_message_id = ?').bind(UNSENT_PLACEHOLDER, lineMessageId),
     db
@@ -480,6 +498,12 @@ export interface MirrorPayload {
   messageType?: string;
   text?: string;
   displayName?: string;
+  mediaStatus?: MediaMirrorFields['mediaStatus'];
+  mediaKey?: string;
+  mediaContentType?: string;
+  mediaSize?: number;
+  mediaReason?: string;
+  mediaFileName?: string;
 }
 
 const NON_TEXT_LABELS: Record<string, string> = {
@@ -494,7 +518,7 @@ const NON_TEXT_LABELS: Record<string, string> = {
 /** 生イベントからミラー本文を組み立てる。replyToken は含めない。 */
 export function buildMirrorPayload(
   event: WebhookEvent,
-  opts: { sentAt: number; displayName?: string | null; unsent?: boolean },
+  opts: { sentAt: number; displayName?: string | null; unsent?: boolean; media?: MediaMirrorFields | null },
 ): MirrorPayload {
   const e = event as LooseEvent;
   const payload: MirrorPayload = {
@@ -514,6 +538,8 @@ export function buildMirrorPayload(
     else payload.text = NON_TEXT_LABELS[msg.type] ?? `[${msg.type}]`;
   }
   if (opts.displayName) payload.displayName = opts.displayName;
+  // 取消済みはメディア情報を載せない（本文と同じく伏せる）。
+  if (opts.media && !opts.unsent) Object.assign(payload, opts.media);
   return payload;
 }
 
@@ -553,8 +579,18 @@ export async function mirrorInboxRow(deps: MirrorDeps, row: { webhook_event_id: 
         : Promise.resolve(null),
       messageId && (event as { type: string }).type === 'message' ? isUnsent(db, messageId) : Promise.resolve(false),
     ]);
+    const msgType = (event as { type: string; message?: { type?: string } }).message?.type;
+    const mediaRow =
+      lineMediaEnabled() && messageId && msgType && MEDIA_MESSAGE_TYPES.has(msgType) ? await getMediaRow(db, messageId) : null;
     const sentAt = now();
-    const body = JSON.stringify(buildMirrorPayload(event, { sentAt, displayName: friend?.display_name ?? null, unsent }));
+    const body = JSON.stringify(
+      buildMirrorPayload(event, {
+        sentAt,
+        displayName: friend?.display_name ?? null,
+        unsent,
+        media: mediaRow ? mediaMirrorFields(mediaRow) : null,
+      }),
+    );
     const signature = await hmacHex(deps.secret, body);
     const res = await fetchFn(deps.url, {
       method: 'POST',

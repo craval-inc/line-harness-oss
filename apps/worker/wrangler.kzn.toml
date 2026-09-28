@@ -17,7 +17,8 @@ workers_dev = true
 #
 # ※ sbo(セールスキャスト本番) の wrangler.toml・fzk の wrangler.fzk.toml とは完全分離。触れない。
 # ※ 管理画面・LIFF を配信しないので [assets] は置かない（notFound は JSON 404）。
-# ※ 受信画像を保存しないので R2(IMAGES) はバインドしない（INCOMING_IMAGE_STORE="0"）。
+# ※ 公開配信用の R2(IMAGES) はバインドしない（INCOMING_IMAGE_STORE="0"）。受信メディアは LINE_MEDIA（きずなの非公開
+#    バケット kizuna-shonin-uploads・line-media/ 配下）に保全し、きずな管理画面（ログイン必須）からだけ見る。
 # ※ 本家 v0.24 の Durable Object 定期実行（TENANT_SCHEDULER）は使わない（バインディング省略時は何もしない
 #    設計）。定期処理は下の Cron Trigger だけで回す（本家は "* * * * *" だが kzn は予約/ウェビナー未使用のため
 #    5分おきで足りる・無料枠の CPU/リクエストを節約）。DO を足す時は [[durable_objects.bindings]] と
@@ -30,6 +31,11 @@ account_id = "01547b03881149dd0db10da0da6928c8"
 binding = "DB"
 database_name = "line-harness-kzn"
 database_id = "d13fdca6-6e95-4084-8a34-b3709a0a92f7"
+
+# [Craval kzn] 受信メディアの非公開保全（LINE_MEDIA_STORE="1"）。公開 URL は作らない。事前に D1 へ K003 を適用すること。
+[[r2_buckets]]
+binding = "LINE_MEDIA"
+bucket_name = "kizuna-shonin-uploads"
 
 [triggers]
 crons = ["*/5 * * * *", "0 */6 * * *"]
@@ -67,6 +73,7 @@ WEBHOOK_INBOX = "1"
 LINE_SEND_DISABLED = "1"
 # Phase 1 はイベントバス（送信Webhook・スコア・自動化・automation_logs）と auto_replies を止める。Phase 3 で外す。
 EVENT_BUS_DISABLED = "1"
+LINE_MEDIA_STORE = "1"
 MIRROR_URL = "https://anami-pat.jp/api/line-harness-event"
 
 # Secrets (要 `wrangler secret put ... -c wrangler.kzn.toml`・値は Bitwarden `line-harness-kzn`):

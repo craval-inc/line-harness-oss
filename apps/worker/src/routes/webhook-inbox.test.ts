@@ -791,3 +791,51 @@ describe('[v024-5b] 行作成前の unfollow 保留（K002）の原子性・冪�
     expect(old.raw.prepare("SELECT pending_unfollow_count AS n FROM friend_follow_state WHERE line_user_id = 'Uregistered'").get()).toEqual({ n: 0 });
   });
 });
+
+describe('[kzn] LINE_MEDIA_STORE: 受信直後のメディア保全（webhook 経路）', () => {
+  const MIRROR = { MIRROR_URL: 'https://mirror.example/api/line-harness-event', MIRROR_SECRET: 'mirror-secret' };
+
+  test('メッセージ転送（取得中）→ 取得・非公開保存 → 状態（done）転送 の順', async () => {
+    const { setLineMediaEnabled } = await import('../services/line-media.js');
+    setLineMediaEnabled(true);
+    const objects = new Map<string, Uint8Array>();
+    const r2 = { put: vi.fn(async (k: string, v: Uint8Array) => { objects.set(k, v); }), delete: vi.fn(async (k: string) => { objects.delete(k); }) };
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('https://api-data.line.me/')) {
+        calls.push({ url: String(url) });
+        return new Response(new Uint8Array(42), { status: 200, headers: { 'Content-Type': 'image/png', 'Content-Length': '42' } });
+      }
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response('ok', { status: 200 });
+    }));
+    try {
+      lineMocks.getProfile.mockResolvedValue({ displayName: 'テスト', userId: USER });
+      const res = await post([image('900001')], env({ ...MIRROR, LINE_MEDIA_STORE: '1', LINE_MEDIA: r2 }));
+      expect(res.status).toBe(200);
+      const order = calls.map((c) => (c.body ? `mirror:${c.body.eventType}:${c.body.mediaStatus ?? ''}` : 'content'));
+      expect(order).toEqual(['mirror:message:pending', 'content', 'mirror:media:done']);
+      expect(calls[0].body).not.toHaveProperty('mediaKey');
+      expect(calls[2].body!.mediaKey).toMatch(/^line-media\/[0-9a-f]{16}\/900001\.png$/);
+      expect(objects.size).toBe(1);
+      expect([...objects.keys()][0]).not.toContain(USER);
+    } finally {
+      setLineMediaEnabled(false);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test('フラグ off なら取得も転送項目の追加もしない（従来挙動）', async () => {
+    const fetchStub = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchStub);
+    try {
+      await post([image('900002')], env({ ...MIRROR }));
+      const urls = fetchStub.mock.calls.map((c) => String((c as unknown as [string])[0]));
+      expect(urls.some((u) => u.startsWith('https://api-data.line.me/'))).toBe(false);
+      const body = JSON.parse(String((fetchStub.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+      expect(body.mediaStatus).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

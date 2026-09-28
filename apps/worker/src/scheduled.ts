@@ -25,6 +25,7 @@ import type { Env } from './index.js';
 import { applyCravalRuntimeFlags } from './craval-runtime-flags.js';
 import { handleWebhookEvent, incomingImageBucket } from './routes/webhook.js';
 import { inboxEnabled, mirrorEnabled, warnMirrorMisconfigOnce, runInboxMaintenance } from './services/webhook-inbox.js';
+import { lineMediaEnabled, runLineMediaMaintenance } from './services/line-media.js';
 
 /**
  * 5分に1回だけ通すゲート。
@@ -111,6 +112,22 @@ export async function scheduled(
       }
     } catch (e) {
       console.error('webhook-inbox maintenance error:', e);
+    }
+    // [Craval kzn] 受信メディア: 予定時刻に達した取得待ちの取得・取消済みの削除・状態の再転送。
+    if (lineMediaEnabled() && env.LINE_MEDIA) {
+      try {
+        const tokens = new Map<string, string>();
+        for (const account of dbAccounts) if (account.is_active) tokens.set(account.id, account.channel_access_token);
+        const media = await runLineMediaMaintenance({
+          db: env.DB,
+          r2: env.LINE_MEDIA,
+          tokenFor: (id) => (id && tokens.get(id)) || env.LINE_CHANNEL_ACCESS_TOKEN,
+          mirror: mirrorEnabled(env) && env.MIRROR_SECRET ? { url: env.MIRROR_URL!, secret: env.MIRROR_SECRET } : null,
+        });
+        if (Object.values(media).some((n) => n > 0)) console.log(`[line-media] ${JSON.stringify(media)}`);
+      } catch (e) {
+        console.error('line-media maintenance error:', e);
+      }
     }
   }
 

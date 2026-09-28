@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { lineMediaEnabled, lineMediaStatus } from '../services/line-media.js';
 import { inboxEnabled, inboxStatus, mirrorEnabled, mirrorReady, resetExhausted } from '../services/webhook-inbox.js';
 import type { Env } from '../index.js';
 
@@ -13,7 +14,12 @@ webhookInboxAdmin.get('/api/webhook-inbox/status', async (c) => {
   if (!inboxEnabled(c.env)) return c.json({ success: false, error: 'Not Found' }, 404);
   return c.json({
     success: true,
-    data: { ...(await inboxStatus(c.env.DB)), mirror_enabled: mirrorEnabled(c.env), mirror_ready: mirrorReady(c.env) },
+    data: {
+      ...(await inboxStatus(c.env.DB)),
+      mirror_enabled: mirrorEnabled(c.env),
+      mirror_ready: mirrorReady(c.env),
+      ...(lineMediaEnabled() ? { media: await lineMediaStatus(c.env.DB) } : {}),
+    },
   });
 });
 

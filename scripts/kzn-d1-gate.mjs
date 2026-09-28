@@ -2,7 +2,7 @@
  * [Craval kzn] kzn 本番 D1 を v0.24 に上げた後、Worker をデプロイする前の検証ゲート。
  * 1つでも満たさなければ exit 1（デプロイに進まない）。問い合わせ自体の失敗も exit 1（fail-closed）。
  *
- *   - 期待スキーマ（packages/db/bootstrap.sql + migrations-kzn/K001 + K002）の全テーブル・全列が本番に存在する
+ *   - 期待スキーマ（packages/db/bootstrap.sql + migrations-kzn/K001 + K002 + K003）の全テーブル・全列が本番に存在する
  *   - 067 の自動応答「マイル」（builtin-mileage-wallet-keyword）が無効
  *   - 有効なマイル付与ルールが 0 件
  *   - available のマイル残高合計が 0（062/063 の移行由来付与が削除済み）
@@ -62,6 +62,7 @@ function expectedColumnsFromRepo() {
   db.exec(readFileSync(join(repoRoot, 'packages', 'db', 'bootstrap.sql'), 'utf8'));
   db.exec(readFileSync(join(repoRoot, 'packages', 'db', 'migrations-kzn', 'K001_webhook_inbox.sql'), 'utf8'));
   db.exec(readFileSync(join(repoRoot, 'packages', 'db', 'migrations-kzn', 'K002_follow_state_pending.sql'), 'utf8'));
+  db.exec(readFileSync(join(repoRoot, 'packages', 'db', 'migrations-kzn', 'K003_line_media.sql'), 'utf8'));
   return db.prepare(COLUMNS_SQL).all();
 }
 
@@ -99,7 +100,7 @@ if (isMain) {
       for (const e of result.errors) console.error(`[kzn-d1-gate] NG: ${e}`);
       process.exit(1);
     }
-    console.log('[kzn-d1-gate] OK — schema matches bootstrap+K001, mileage auto-reply/rules disabled, available=0');
+    console.log('[kzn-d1-gate] OK — schema matches bootstrap+K001..K003, mileage auto-reply/rules disabled, available=0');
   } catch (err) {
     console.error('[kzn-d1-gate] NG: gate query failed (fail-closed):', err instanceof Error ? err.message : err);
     process.exit(1);

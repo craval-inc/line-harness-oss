@@ -1,0 +1,281 @@
+/**
+ * [Craval kzn] LINE_MEDIA_STORE（受信メディアの非公開保全）のテスト。
+ * DB は node:sqlite 上の D1 互換アダプタ（bootstrap + K001〜K003）、R2 はメモリ実装、LINE API は fetch スタブ。
+ */
+import { describe, expect, test, vi, beforeEach, afterEach } from 'vitest';
+import type { WebhookEvent } from '@line-crm/line-sdk';
+import { createKznTestDb, type SqliteD1 } from '../test-utils/sqlite-d1.js';
+import { saveInboxEvents, applyUnsend, buildMirrorPayload } from './webhook-inbox.js';
+import {
+  setLineMediaEnabled,
+  fetchLineMedia,
+  purgeUnsentMedia,
+  runLineMediaMaintenance,
+  mirrorMediaRow,
+  getMediaRow,
+  mediaMirrorFields,
+  userHash,
+  MAX_MEDIA_BYTES,
+  MEDIA_RETRY_SCHEDULE_MS,
+} from './line-media.js';
+
+const USER = 'U0000000000000000000000000000media';
+const T0 = 1_800_000_000_000;
+
+class MemR2 {
+  objects = new Map<string, { body: Uint8Array; contentType?: string }>();
+  putFails = false;
+  async put(key: string, value: Uint8Array, opts?: { httpMetadata?: { contentType?: string } }) {
+    if (this.putFails) throw new Error('r2 down');
+    this.objects.set(key, { body: value, contentType: opts?.httpMetadata?.contentType });
+    return {};
+  }
+  async delete(key: string) {
+    this.objects.delete(key);
+  }
+  asR2(): R2Bucket {
+    return this as unknown as R2Bucket;
+  }
+}
+
+let db: SqliteD1;
+let r2: MemR2;
+let seq = 0;
+const evId = () => `01MEDIAEVENT${String(++seq).padStart(14, '0')}`;
+
+function media(messageId: string, type = 'image', extra: Record<string, unknown> = {}): WebhookEvent {
+  return {
+    type: 'message',
+    webhookEventId: evId(),
+    timestamp: T0,
+    source: { type: 'user', userId: USER },
+    mode: 'active',
+    deliveryContext: { isRedelivery: false },
+    message: { id: messageId, type, contentProvider: { type: 'line' }, ...extra },
+  } as unknown as WebhookEvent;
+}
+function textEv(messageId: string): WebhookEvent {
+  return {
+    type: 'message', webhookEventId: evId(), timestamp: T0, source: { type: 'user', userId: USER },
+    message: { id: messageId, type: 'text', text: 'hi' },
+  } as unknown as WebhookEvent;
+}
+function unsendEv(messageId: string): WebhookEvent {
+  return { type: 'unsend', webhookEventId: evId(), timestamp: T0 + 1, source: { type: 'user', userId: USER }, unsend: { messageId } } as unknown as WebhookEvent;
+}
+
+const q = (sql: string, ...p: unknown[]) => db.raw.prepare(sql).all(...(p as never[])) as Record<string, unknown>[];
+
+function contentResponse(bytes: number, contentType = 'image/jpeg', withLength = true) {
+  const headers: Record<string, string> = { 'Content-Type': contentType };
+  if (withLength) headers['Content-Length'] = String(bytes);
+  return new Response(new Uint8Array(bytes), { status: 200, headers });
+}
+
+function deps(fetchFn: typeof fetch, now = () => T0) {
+  return { db: db.asD1(), r2: r2.asR2(), tokenFor: () => 'token', fetchFn, now };
+}
+
+async function save(events: WebhookEvent[], now = T0) {
+  return saveInboxEvents(db.asD1(), events, { lineAccountId: null, mirror: true, now });
+}
+
+beforeEach(() => {
+  db = createKznTestDb();
+  r2 = new MemR2();
+  setLineMediaEnabled(true);
+});
+afterEach(() => {
+  setLineMediaEnabled(false);
+  vi.unstubAllGlobals();
+});
+
+describe('保存時の登録', () => {
+  test('画像・動画・音声・ファイルは取得待ち、テキストは対象外', async () => {
+    await save([media('m1', 'image'), media('m2', 'video'), media('m3', 'audio'), media('m4', 'file', { fileName: '住民票.pdf' }), textEv('m5')]);
+    const rows = q('SELECT line_message_id, status, message_type, file_name FROM line_media ORDER BY line_message_id');
+    expect(rows.map((r) => [r.line_message_id, r.status])).toEqual([
+      ['m1', 'pending'], ['m2', 'pending'], ['m3', 'pending'], ['m4', 'pending'],
+    ]);
+    expect(rows[3].file_name).toBe('住民票.pdf');
+  });
+
+  test('外部提供（contentProvider=external）は取得不能で確定', async () => {
+    await save([media('m1', 'image', { contentProvider: { type: 'external', originalContentUrl: 'https://x' } })]);
+    expect(q('SELECT status, reason FROM line_media')[0]).toMatchObject({ status: 'expired', reason: 'external' });
+  });
+
+  test('取消が先着していれば unsent で登録（取得しない）', async () => {
+    await save([unsendEv('m1')]);
+    await save([media('m1')]);
+    expect(q('SELECT status FROM line_media')[0].status).toBe('unsent');
+    const fetchFn = vi.fn();
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('skipped');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test('同一リクエストで message→unsend でも unsent', async () => {
+    await save([media('m1'), unsendEv('m1')]);
+    expect(q('SELECT status FROM line_media')[0].status).toBe('unsent');
+  });
+
+  test('user_hash は userId の SHA-256 先頭16桁（userId そのものは保存しない）', async () => {
+    await save([media('m1')]);
+    const row = q('SELECT * FROM line_media')[0];
+    expect(row.user_hash).toBe(await userHash(USER));
+    expect(JSON.stringify(row)).not.toContain(USER);
+  });
+
+  test('env 未設定（フラグ off）なら line_media に触れない＝K003 未適用の DB でも従来どおり', async () => {
+    setLineMediaEnabled(false);
+    db = createKznTestDb({ withMedia: false });
+    await expect(save([media('m1'), unsendEv('m1')])).resolves.toBeTruthy();
+    await expect(applyUnsend(db.asD1(), 'm1', T0)).resolves.toBeUndefined();
+  });
+});
+
+describe('取得と保存', () => {
+  test('成功: 非公開 R2 に保存・キーに PII なし・状態 done・未転送', async () => {
+    await save([media('100001')]);
+    const out = await fetchLineMedia(deps(vi.fn(async () => contentResponse(1234)) as never), '100001');
+    expect(out).toBe('done');
+    const row = await getMediaRow(db.asD1(), '100001');
+    expect(row).toMatchObject({ status: 'done', content_type: 'image/jpeg', size: 1234 });
+    expect(row!.r2_key).toMatch(/^line-media\/[0-9a-f]{16}\/100001\.jpg$/);
+    expect(row!.r2_key).not.toContain(USER);
+    expect(r2.objects.get(row!.r2_key!)?.contentType).toBe('image/jpeg');
+    expect(q('SELECT mirrored FROM line_media')[0].mirrored).toBe(0);
+  });
+
+  test('ファイルは Content-Type が汎用でもファイル名の拡張子を使う', async () => {
+    await save([media('100002', 'file', { fileName: 'doc.PDF' })]);
+    await fetchLineMedia(deps(vi.fn(async () => contentResponse(10, 'application/octet-stream')) as never), '100002');
+    expect((await getMediaRow(db.asD1(), '100002'))!.r2_key).toMatch(/100002\.pdf$/);
+  });
+
+  test.each([404, 410])('%s は取得不能で確定（再試行しない）', async (status) => {
+    await save([media('m1')]);
+    const out = await fetchLineMedia(deps(vi.fn(async () => new Response('', { status })) as never), 'm1');
+    expect(out).toBe('expired');
+    expect(q('SELECT status, reason FROM line_media')[0]).toMatchObject({ status: 'expired', reason: `gone_${status}` });
+  });
+
+  test('Content-Length が 25MB 超は読まずに確定', async () => {
+    await save([media('m1', 'video')]);
+    const out = await fetchLineMedia(deps(vi.fn(async () => new Response(new Uint8Array(10), {
+      status: 200, headers: { 'Content-Length': String(MAX_MEDIA_BYTES + 1), 'Content-Type': 'video/mp4' },
+    })) as never), 'm1');
+    expect(out).toBe('expired');
+    expect(q('SELECT reason FROM line_media')[0].reason).toBe('too_large');
+    expect(r2.objects.size).toBe(0);
+  });
+
+  test('Content-Length 無しでも読み込み中に 25MB を超えたら打ち切って確定', async () => {
+    await save([media('m1', 'video')]);
+    const out = await fetchLineMedia(deps(vi.fn(async () => contentResponse(MAX_MEDIA_BYTES + 5, 'video/mp4', false)) as never), 'm1');
+    expect(out).toBe('expired');
+    expect(r2.objects.size).toBe(0);
+  });
+
+  test('一時失敗は受信直後→5分後→60分後の3回で打ち切り（failed）', async () => {
+    await save([media('m1')], T0);
+    const fail = vi.fn(async () => new Response('', { status: 500 })) as never;
+    expect(await fetchLineMedia(deps(fail), 'm1')).toBe('pending');
+    expect(q('SELECT attempts, next_attempt_at FROM line_media')[0]).toMatchObject({ attempts: 1, next_attempt_at: T0 + MEDIA_RETRY_SCHEDULE_MS[1] });
+    expect(await fetchLineMedia(deps(fail), 'm1')).toBe('pending');
+    expect(q('SELECT attempts, next_attempt_at FROM line_media')[0]).toMatchObject({ attempts: 2, next_attempt_at: T0 + MEDIA_RETRY_SCHEDULE_MS[2] });
+    expect(await fetchLineMedia(deps(fail), 'm1')).toBe('failed');
+    expect(q('SELECT status, reason, mirrored FROM line_media')[0]).toMatchObject({ status: 'failed', reason: 'http_500', mirrored: 0 });
+  });
+
+  test('ネットワーク例外・R2 失敗も一時失敗として再試行', async () => {
+    await save([media('m1')]);
+    expect(await fetchLineMedia(deps(vi.fn(async () => { throw new TypeError('net'); }) as never), 'm1')).toBe('pending');
+    r2.putFails = true;
+    expect(await fetchLineMedia(deps(vi.fn(async () => contentResponse(5)) as never), 'm1')).toBe('pending');
+    expect(q('SELECT attempts FROM line_media')[0].attempts).toBe(2);
+  });
+
+  test('Cron は予定時刻に達した行だけ取得する', async () => {
+    await save([media('m1')], T0);
+    const fail = vi.fn(async () => new Response('', { status: 503 })) as never;
+    await fetchLineMedia(deps(fail), 'm1'); // attempts=1, 次は +5分
+    const ok = vi.fn(async () => contentResponse(3));
+    let r = await runLineMediaMaintenance({ ...deps(ok as never, () => T0 + 60_000), mirror: null });
+    expect(r.fetched).toBe(0);
+    expect(ok).not.toHaveBeenCalled();
+    r = await runLineMediaMaintenance({ ...deps(ok as never, () => T0 + MEDIA_RETRY_SCHEDULE_MS[1]), mirror: null });
+    expect(r.fetched).toBe(1);
+  });
+});
+
+describe('送信取消', () => {
+  test('保存済みの後に取消 → unsent・Cron/直後の削除で R2 から消える', async () => {
+    await save([media('m1')]);
+    await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1');
+    expect(r2.objects.size).toBe(1);
+    await save([unsendEv('m1')]);
+    expect(q('SELECT status FROM line_media')[0].status).toBe('unsent');
+    expect(await purgeUnsentMedia(db.asD1(), r2.asR2(), T0)).toBe(1);
+    expect(r2.objects.size).toBe(0);
+    expect(q('SELECT r2_key, r2_deleted FROM line_media')[0]).toMatchObject({ r2_key: null, r2_deleted: 1 });
+  });
+
+  test('取得中に取消されたら、書いたオブジェクトを消して unsent', async () => {
+    await save([media('m1')]);
+    const fetchFn = vi.fn(async () => {
+      await applyUnsend(db.asD1(), 'm1', T0 + 1); // 取得の最中に取消が届く
+      return contentResponse(8);
+    });
+    expect(await fetchLineMedia(deps(fetchFn as never), 'm1')).toBe('unsent');
+    expect(r2.objects.size).toBe(0);
+  });
+
+  test('取消済みメッセージのミラーにはメディア情報を載せない', async () => {
+    await save([media('m1')]);
+    await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1');
+    const row = (await getMediaRow(db.asD1(), 'm1'))!;
+    const p = buildMirrorPayload(media('m1'), { sentAt: T0, unsent: true, media: mediaMirrorFields(row) });
+    expect(p.mediaKey).toBeUndefined();
+    expect(p.mediaStatus).toBeUndefined();
+  });
+});
+
+describe('きずなへの状態転送', () => {
+  const MIRROR = { url: 'https://mirror.example/api/line-harness-event', secret: 'mirror-secret' };
+
+  test('done を署名付きで送り mirrored=1・同じ状態は冪等キー media:<id>:<status>', async () => {
+    await save([media('m1')]);
+    await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1');
+    const fetchFn = vi.fn(async (_u: string, init: RequestInit) => new Response('ok', { status: 200 }));
+    expect(await mirrorMediaRow({ db: db.asD1(), ...MIRROR, fetchFn: fetchFn as never, now: () => T0 }, 'm1')).toBe(true);
+    const init = fetchFn.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ webhookEventId: 'media:m1:done', eventType: 'media', lineMessageId: 'm1', mediaStatus: 'done', mediaContentType: 'image/jpeg', mediaSize: 8 });
+    expect(body.mediaKey).toMatch(/^line-media\//);
+    expect(body.lineUserId).toBeUndefined();
+    expect((init.headers as Record<string, string>)['X-Mirror-Signature']).toMatch(/^[0-9a-f]{64}$/);
+    expect(q('SELECT mirrored FROM line_media')[0].mirrored).toBe(1);
+  });
+
+  test('転送失敗は mirror_attempts++ で Cron が再送', async () => {
+    await save([media('m1')]);
+    await fetchLineMedia(deps(vi.fn(async () => new Response('', { status: 404 })) as never), 'm1');
+    const fetchFn = vi.fn(async () => new Response('x', { status: 500 }));
+    expect(await mirrorMediaRow({ db: db.asD1(), ...MIRROR, fetchFn: fetchFn as never }, 'm1')).toBe(false);
+    expect(q('SELECT mirrored, mirror_attempts FROM line_media')[0]).toMatchObject({ mirrored: 0, mirror_attempts: 1 });
+    const ok = vi.fn(async () => new Response('ok', { status: 200 }));
+    const r = await runLineMediaMaintenance({ ...deps(ok as never), mirror: MIRROR });
+    expect(r.mirrored).toBe(1);
+    expect(JSON.parse((ok.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toMatchObject({ mediaStatus: 'expired', mediaReason: 'gone_404' });
+  });
+
+  test('鍵が無ければ転送しない（試行回数も進めない）', async () => {
+    await save([media('m1')]);
+    await fetchLineMedia(deps(vi.fn(async () => contentResponse(8)) as never), 'm1');
+    const fetchFn = vi.fn();
+    expect(await mirrorMediaRow({ db: db.asD1(), url: MIRROR.url, secret: undefined, fetchFn: fetchFn as never }, 'm1')).toBe(false);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(q('SELECT mirror_attempts FROM line_media')[0].mirror_attempts).toBe(0);
+  });
+});

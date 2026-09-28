@@ -21,6 +21,7 @@ import { buildMessage } from '../services/step-delivery.js';
 import { pushImmediateFirstStep } from '../services/immediate-first-step.js';
 import type { Env } from '../index.js';
 import { hashPIIPrefix } from '../utils/pii-hash.js';
+import { lineMediaEnabled, fetchLineMedia, mirrorMediaRow, purgeUnsentMedia } from '../services/line-media.js';
 import {
   inboxEnabled,
   mirrorEnabled,
@@ -257,6 +258,16 @@ webhook.post('/webhook', async (c) => {
             await mirrorInboxRow({ db, url: c.env.MIRROR_URL!, secret: c.env.MIRROR_SECRET! }, row);
           }
         }
+        // [Craval kzn] LINE_MEDIA_STORE: メッセージの転送（取得中）の後にメディアを取得し、状態変化を転送する。
+        // 重いメディアでメッセージ転送を遅らせない。取り残しは Cron（runLineMediaMaintenance）が拾う。
+        if (lineMediaEnabled() && c.env.LINE_MEDIA) {
+          await preserveMediaForEvent(event, {
+            db,
+            r2: c.env.LINE_MEDIA,
+            tokenFor: () => channelAccessToken,
+            mirror: mirrorReady(c.env) ? { url: c.env.MIRROR_URL!, secret: c.env.MIRROR_SECRET! } : null,
+          });
+        }
       }
       for (const event of saved.untracked) {
         try {
@@ -303,6 +314,35 @@ webhook.post('/webhook', async (c) => {
 
   return c.json({ status: 'ok' }, 200);
 });
+
+/**
+ * [Craval kzn] 受信直後のメディア保全: 取得待ちなら取得→状態転送。取消イベントなら保存済みオブジェクトを消す。
+ * 失敗は握りつぶす（Cron が再試行・再転送する）。
+ */
+async function preserveMediaForEvent(
+  event: WebhookEvent,
+  deps: {
+    db: D1Database;
+    r2: R2Bucket;
+    tokenFor: (lineAccountId: string | null) => string;
+    mirror: { url: string; secret: string } | null;
+  },
+): Promise<void> {
+  try {
+    const type = (event as { type: string }).type;
+    if (type === 'unsend') {
+      await purgeUnsentMedia(deps.db, deps.r2, Date.now(), 5);
+      return;
+    }
+    const messageId = type === 'message' ? (event as { message?: { id?: string } }).message?.id : undefined;
+    if (!messageId) return;
+    const out = await fetchLineMedia({ db: deps.db, r2: deps.r2, tokenFor: deps.tokenFor }, messageId);
+    if (out === 'skipped') return;
+    if (deps.mirror) await mirrorMediaRow({ db: deps.db, ...deps.mirror }, messageId);
+  } catch (err) {
+    console.error('[line-media] preserve failed:', err instanceof Error ? err.message : 'error');
+  }
+}
 
 /** [Craval kzn] INCOMING_IMAGE_STORE=0 なら undefined（画像はラベル記録のみ）。未設定なら本家どおり IMAGES。 */
 export function incomingImageBucket(env: { INCOMING_IMAGE_STORE?: string; IMAGES?: R2Bucket }): R2Bucket | undefined {

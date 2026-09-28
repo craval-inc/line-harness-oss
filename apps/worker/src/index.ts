@@ -116,6 +116,8 @@ export type Env = {
     MIRROR_URL?: string;            // 受信イベントの転送先（WEBHOOK_INBOX 時のみ）
     MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
     WEBHOOK_MAINTENANCE?: string;   // "1" で D1 migration 用メンテ: /webhook は署名検証後 503・定期処理停止（D1 に書かない）
+    LINE_MEDIA_STORE?: string;      // "1" で受信メディアを非公開 R2（LINE_MEDIA）へ保全（WEBHOOK_INBOX=1 時のみ）
+    LINE_MEDIA?: R2Bucket;          // 受信メディアの保存先（kzn はきずなの kizuna-shonin-uploads・公開 URL なし）
     ADMIN_COOKIE_SAMESITE?: string; // Optional override: 'Strict' | 'Lax' | 'None'
     ADMIN_ALLOW_CROSS_SITE?: string; // 'true' opts into SameSite=None cross-site cookies
     // External SSO into the admin session (GET /admin/sso). Optional: when the

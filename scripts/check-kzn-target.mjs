@@ -9,7 +9,7 @@
  *   - Phase 1 の安全設定（PUBLIC_PATHS_ALLOW は /webhook 必須・追加は /api/auth/login|logout のみ / INCOMING_IMAGE_STORE="0" /
  *     WEBHOOK_INBOX="1" / LINE_SEND_DISABLED="1" / EVENT_BUS_DISABLED="1"）が入っている
  *   - MIRROR_URL があれば、MIRROR_SECRET を secret で入れる必要がある旨を表示（secret は静的に検査できない）
- *   - R2 バインディング（[[r2_buckets]]）が無い
+ *   - R2 バインディングは LINE_MEDIA → kizuna-shonin-uploads（受信メディアの非公開保全）だけ。LINE_MEDIA_STORE=1 ならその1本が必須
  *   - packages/line-sdk/dist に送信禁止ガード（setLineSendDisabled）が含まれている
  *     （wrangler は import 条件で dist を読むため、未ビルドだとガード無しでデプロイされる）
  *   - CLOUDFLARE_ACCOUNT_ID が設定されていれば bkobu と一致
@@ -98,7 +98,28 @@ if (!existsSync(tomlPath)) {
   // WEBHOOK_MAINTENANCE は D1 migration の間だけ `wrangler deploy --var WEBHOOK_MAINTENANCE:1` で渡す（toml に書くと受信停止が常駐する）
   if (tableValue(toml, 'vars', 'WEBHOOK_MAINTENANCE') !== null) errors.push('WEBHOOK_MAINTENANCE must not be in [vars] — pass it only via `--var WEBHOOK_MAINTENANCE:1` during migration');
 
-  if (/^\s*\[\[r2_buckets\]\]/m.test(toml)) errors.push('R2 binding must not exist in kzn (incoming images are not stored)');
+  // R2 は「受信メディアの非公開保全（LINE_MEDIA → kizuna-shonin-uploads）」の1本だけ許可。公開配信用の IMAGES は不可。
+  // [[r2_buckets]] ブロックを行単位で切り出す（次のテーブル見出しまで）。
+  const r2Blocks = [];
+  {
+    let cur = null;
+    for (const line of toml.split(/\r?\n/)) {
+      if (/^\s*\[\[r2_buckets\]\]\s*$/.test(line)) { cur = []; r2Blocks.push(cur); continue; }
+      if (/^\s*\[/.test(line)) { cur = null; continue; }
+      if (cur) cur.push(line);
+    }
+  }
+  for (const lines of r2Blocks) {
+    const block = lines.join('\n');
+    const binding = /^\s*binding\s*=\s*"([^"]*)"/m.exec(block)?.[1];
+    const bucket = /^\s*bucket_name\s*=\s*"([^"]*)"/m.exec(block)?.[1];
+    if (binding !== 'LINE_MEDIA' || bucket !== 'kizuna-shonin-uploads') {
+      errors.push(`R2 binding not allowed in kzn: binding=${binding} bucket=${bucket}（許可は LINE_MEDIA → kizuna-shonin-uploads のみ・公開用 IMAGES は不可）`);
+    }
+  }
+  const mediaStore = tableValue(toml, 'vars', 'LINE_MEDIA_STORE');
+  if (mediaStore === '1' && !r2Blocks.length) errors.push('LINE_MEDIA_STORE="1" requires [[r2_buckets]] binding LINE_MEDIA → kizuna-shonin-uploads');
+  if (mediaStore === '1') console.log('[check-kzn-target] NOTE: LINE_MEDIA_STORE=1 — 本番 D1 に K003_line_media.sql を先に適用すること（未適用だと受信の保存 batch が失敗し 500＝LINE 再送）');
 }
 
 if (!existsSync(sdkDist)) {

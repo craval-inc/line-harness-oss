@@ -103,11 +103,12 @@ export class SqliteD1 {
 const here = dirname(fileURLToPath(import.meta.url));
 const dbPkg = join(here, '..', '..', '..', '..', 'packages', 'db');
 
-/** 本家 bootstrap.sql（全 migration 反映済み）+ kzn 専用 migration（migrations-kzn/K001）を適用した DB を作る。 */
-export function createKznTestDb(): SqliteD1 {
+/** 本家 bootstrap.sql（全 migration 反映済み）+ kzn 専用 migration（migrations-kzn/K001〜K003）を適用した DB を作る。withMedia=false で K003 を省く（env 未設定＝旧スキーマ相当の検証用）。 */
+export function createKznTestDb(opts: { withMedia?: boolean } = {}): SqliteD1 {
   const db = new SqliteD1();
   db.raw.exec(readFileSync(join(dbPkg, 'bootstrap.sql'), 'utf8'));
   db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K001_webhook_inbox.sql'), 'utf8'));
   db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K002_follow_state_pending.sql'), 'utf8'));
+  if (opts.withMedia !== false) db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K003_line_media.sql'), 'utf8'));
   return db;
 }
