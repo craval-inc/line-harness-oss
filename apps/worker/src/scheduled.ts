@@ -25,6 +25,7 @@ import type { Env } from './index.js';
 import { applyCravalRuntimeFlags } from './craval-runtime-flags.js';
 import { handleWebhookEvent, incomingImageBucket } from './routes/webhook.js';
 import { inboxEnabled, mirrorEnabled, warnMirrorMisconfigOnce, runInboxMaintenance } from './services/webhook-inbox.js';
+import { runKizunaWatchdog } from './services/kizuna-watchdog.js';
 import { lineMediaEnabled, runLineMediaMaintenance } from './services/line-media.js';
 
 /**
@@ -77,6 +78,16 @@ export async function scheduled(
   }
   // [Craval kzn] Cron / DO alarm のどちらから来ても送信禁止・イベントバス停止を反映する。
   applyCravalRuntimeFlags(env);
+
+  // [Craval kzn] きずな通知 cron の独立監視（5 分足の tick だけ・env 未設定なら何もしない）。他のジョブを止めない。
+  if (isFiveMinuteTick(event)) {
+    try {
+      const r = await runKizunaWatchdog({ db: env.DB, env, nowMs: Date.now() });
+      if (r && r !== 'healthy') console.warn(`[kizuna-watchdog] ${r}`);
+    } catch (e) {
+      console.error('kizuna-watchdog error:', e);
+    }
+  }
 
   // Get all active accounts from DB
   const dbAccounts = await getLineAccounts(env.DB);

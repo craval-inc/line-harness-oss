@@ -117,6 +117,9 @@ export type Env = {
     MIRROR_SECRET?: string;         // 転送の HMAC 署名鍵
     WEBHOOK_MAINTENANCE?: string;   // "1" で D1 migration 用メンテ: /webhook は署名検証後 503・定期処理停止（D1 に書かない）
     LINE_MEDIA_STORE?: string;      // "1" で受信メディアを非公開 R2（LINE_MEDIA）へ保全（WEBHOOK_INBOX=1 時のみ）
+    KIZUNA_HEARTBEAT_URL?: string;      // [Craval kzn] きずな通知 cron の heartbeat API（独立監視）
+    KIZUNA_HEARTBEAT_TOKEN?: string;    // 上の Bearer（secret）
+    WATCHDOG_CHAT_WEBHOOK_URL?: string; // 停止時の通知先 Google Chat Incoming Webhook（secret）
     LINE_REPLY_RESERVE?: string;    // [Craval kzn] 配信・ステップ配信・リマインダーが使わずに残す返信用の通数（未設定=0）
     LINE_MEDIA?: R2Bucket;          // 受信メディアの保存先（kzn はきずなの kizuna-shonin-uploads・公開 URL なし）
     ADMIN_COOKIE_SAMESITE?: string; // Optional override: 'Strict' | 'Lax' | 'None'

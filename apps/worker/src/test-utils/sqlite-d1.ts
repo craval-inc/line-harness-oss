@@ -110,5 +110,6 @@ export function createKznTestDb(opts: { withMedia?: boolean } = {}): SqliteD1 {
   db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K001_webhook_inbox.sql'), 'utf8'));
   db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K002_follow_state_pending.sql'), 'utf8'));
   if (opts.withMedia !== false) db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K003_line_media.sql'), 'utf8'));
+  db.raw.exec(readFileSync(join(dbPkg, 'migrations-kzn', 'K004_kizuna_watchdog.sql'), 'utf8'));
   return db;
 }

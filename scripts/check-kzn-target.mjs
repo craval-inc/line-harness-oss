@@ -96,6 +96,11 @@ if (!existsSync(tomlPath)) {
   }
 
   // WEBHOOK_MAINTENANCE は D1 migration の間だけ `wrangler deploy --var WEBHOOK_MAINTENANCE:1` で渡す（toml に書くと受信停止が常駐する）
+  for (const secret of ['KIZUNA_HEARTBEAT_TOKEN', 'WATCHDOG_CHAT_WEBHOOK_URL']) {
+    if (tableValue(toml, 'vars', secret) !== null) errors.push(`${secret} must not be in [vars] (plaintext) — set it with \`wrangler secret put ${secret} -c wrangler.kzn.toml\``);
+  }
+  const hbUrl = tableValue(toml, 'vars', 'KIZUNA_HEARTBEAT_URL');
+  if (hbUrl !== null && !/^https:\/\/[^\s]+$/.test(hbUrl)) errors.push(`[vars] KIZUNA_HEARTBEAT_URL must be an https URL, got "${hbUrl}"`);
   if (tableValue(toml, 'vars', 'WEBHOOK_MAINTENANCE') !== null) errors.push('WEBHOOK_MAINTENANCE must not be in [vars] — pass it only via `--var WEBHOOK_MAINTENANCE:1` during migration');
 
   // R2 は「受信メディアの非公開保全（LINE_MEDIA → kizuna-shonin-uploads）」の1本だけ許可。公開配信用の IMAGES は不可。
