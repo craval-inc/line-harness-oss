@@ -92,6 +92,11 @@ node ../../scripts/check-craval-target.mjs $T   # 取り違え防止（account /
 - **②〜⑤で止まった（メンテ中＝Worker 全体が 503 で D1 に何も書いていない）**: 以降は当てない → `npx wrangler d1 time-travel restore line-harness-$T -c wrangler.$T.toml --bookmark=<bookmark.txt の値>` → **手順0で用意済みの旧版**を出す: `cd /c/temp/lh-old-$T/apps/worker && npx wrangler deploy -c wrangler.$T.toml`（旧コードに `ADMIN_ALLOW_CROSS_SITE` 等の新しい vars があっても無害）→ `whtest 200` → 旧管理画面は触っていないのでそのまま使える。
 - **③の後（新 Worker で受信済み）に問題**: bookmark に戻すと受信が消えるので restore しない。`--var WEBHOOK_MAINTENANCE:1` で受信を止めて前進修正。
 
+## 5b. 残存リスク（CODEX レビューで確認・受容）
+
+- メンテ用デプロイ前に始まった**旧版の HTTP 処理が、クライアント接続を保ったまま 16 分以上外部通信を待ち続け、退避後に D1 へ書き込む**と、失敗時の restore でその書き込みが消える（Cloudflare は接続中の HTTP 実行に実時間上限を設けていない）。このアプリの管理 API・LIFF・公開フォームにそのような長時間処理は無く、sbo/fzk のトラフィックもほぼ 0（2026-09-28: 友だち 1 / 0・受信 0）なので受容。Cron（上限15分）と waitUntil（応答後30秒）は 16 分待機で担保。
+- LINE の Webhook 再送は到達保証が無い（メンテ中に届いた受信は再送頼み）。
+
 ## 6. 所要時間（見込み）
 
 1 テナント: 準備（ビルド・旧版 dry-run）15 分・メンテ窓 約 20 分（16 分待機＋適用数分）・管理画面/LIFF 10 分・確認 5 分 ＝ 約 50 分。2 テナントは準備を並行すれば約 1.5 時間。

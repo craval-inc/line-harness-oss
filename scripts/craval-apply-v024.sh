@@ -43,6 +43,7 @@ step "①' 旧版の実行が終わるまで待つ（Cloudflare の上限: Cron 
 # 最長でも15分で終わるので、デプロイから15分（+1分の余裕）経つまで退避しない＝restore で消える書き込みを作らない。
 [ -n "${MAINT_STARTED:-}" ] || { echo "NG: MAINT_STARTED が未設定（メンテ用デプロイ直後に export MAINT_STARTED=\$(date +%s)）"; exit 1; }
 MIN_WAIT=${MIN_WAIT_SEC:-960}
+[ "$MIN_WAIT" -ge 960 ] 2>/dev/null || { echo "NG: MIN_WAIT_SEC は 960 以上（旧版 Cron の実行上限15分＋余裕）"; exit 1; }
 elapsed=$(( $(date +%s) - MAINT_STARTED ))
 if [ "$elapsed" -lt "$MIN_WAIT" ]; then echo "  メンテ開始から ${elapsed}s。あと $((MIN_WAIT - elapsed))s 待つ"; sleep $((MIN_WAIT - elapsed)); fi
 
