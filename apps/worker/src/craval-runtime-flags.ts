@@ -1,10 +1,10 @@
-import { setLineSendDisabled } from '@line-crm/line-sdk';
+import { setLineSendDisabled, setLineSendGuard } from '@line-crm/line-sdk';
 // ルート '@line-crm/db' ではなくフラグのモジュールを直接読む（多くの既存テストが '@line-crm/db' を丸ごとモックするため）。
 // 同じファイルなので db 内部（mileage.ts / tags.ts）の判定と状態を共有する。
 import { setMileageDisabled } from '@line-crm/db/src/craval-flags.js';
 import { setEventBusDisabled } from './services/event-bus.js';
 import { setLineMediaEnabled, lineMediaConfigured } from './services/line-media.js';
-import { setLineReplyReserve } from './services/quota-alert.js';
+import { setLineReplyReserve, getLineReplyReserve, consumeReplyReserveBudget } from './services/quota-alert.js';
 
 /**
  * [Craval kzn] env からプロセス内フラグを反映する（fetch / scheduled 入口で毎回呼ぶ）。
@@ -23,4 +23,6 @@ export function applyCravalRuntimeFlags(
   setLineMediaEnabled(!!env && lineMediaConfigured(env));
   // 返信予約枠（配信・ステップ配信・リマインダーが使わずに残す通数）。未設定=0=本家と同一
   setLineReplyReserve(Number.parseInt(env?.LINE_REPLY_RESERVE ?? '', 10));
+  // 予約枠があれば、全ての push / multicast（ステップ・リマインダー・即時初回ステップ・相談リマインダー等）を通数ガードに通す
+  setLineSendGuard(getLineReplyReserve() > 0 ? (client, recipients) => consumeReplyReserveBudget(client, recipients) : null);
 }

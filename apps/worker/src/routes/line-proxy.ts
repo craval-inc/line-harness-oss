@@ -29,6 +29,7 @@ import {
   notifyQuotaAlert,
   readPlanQuotaSnapshot,
   type PlanQuotaShortfall,
+  getLineReplyReserve,
 } from '../services/quota-alert.js';
 
 /**
@@ -821,6 +822,11 @@ function proxyHandler(prefix: string, upstreamBase: string, logSends: boolean) {
       // remaining=0 の「何も送れない」状態だけブロックし、上流 429 の検知 (下)
       // で silent failure を拾う。
       const blocked = await guardLinePlanQuota(c, caller, bulkAudience);
+      if (blocked) return blocked;
+    }
+    // [Craval kzn] 返信予約枠がある環境では、プロキシ経由の 1:1 push も予約枠を割らせない（相談リマインダー等）。
+    if (isMessageSend && path === '/v2/bot/message/push' && getLineReplyReserve() > 0) {
+      const blocked = await guardLinePlanQuota(c, caller, 1);
       if (blocked) return blocked;
     }
 

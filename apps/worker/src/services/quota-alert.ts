@@ -454,6 +454,29 @@ export async function notifyQuotaAlert(
 }
 
 /**
+ * [Craval kzn] LineClient の送信ガード本体（push / multicast の直前に呼ばれる）。
+ * 「残り − 予約枠 < 宛先数」なら LinePlanQuotaError を投げて送らせない。通ったら TTL キャッシュ中の
+ * スナップショットの残りを宛先数だけ減らす＝1回の Cron で何通送っても予約枠を割らない（キャッシュが切れたら API で読み直す）。
+ * 予約0・上限なしプラン・確認 API の失敗は何もしない（fail-open＝本家と同じく送信を止めない）。
+ */
+export async function consumeReplyReserveBudget(client: PlanQuotaClient, recipients: number): Promise<void> {
+  if (lineReplyReserve <= 0 || recipients <= 0) return;
+  let snapshot: PlanQuotaSnapshot | null;
+  try {
+    snapshot = await readPlanQuotaSnapshot(client, 'craval-reply-reserve');
+  } catch (err) {
+    console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
+    return;
+  }
+  if (!snapshot) return;
+  if (snapshot.remaining - lineReplyReserve < recipients) {
+    throw new LinePlanQuotaError({ ...snapshot, audience: recipients, reserved: lineReplyReserve });
+  }
+  snapshot.remaining -= recipients;
+  snapshot.consumption += recipients;
+}
+
+/**
  * [Craval kzn] 1通ずつ送る定期配信（ステップ配信・リマインダー）の前ガード。
  * 予約枠が設定されていて「残り − 予約枠 < 1」なら true（＝今回の tick は送らない・次の tick で再評価）。
  * 予約0・上限なしプラン・確認 API の失敗は false（fail-open＝本家と同じく送信を止めない）。

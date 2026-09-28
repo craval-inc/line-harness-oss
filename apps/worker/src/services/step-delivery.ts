@@ -21,7 +21,7 @@ import type { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
 import { getQuotaUsage, quotaEnabled, type QuotaEnv } from './quota.js';
-import { replyReserveExhausted } from './quota-alert.js';
+import { replyReserveExhausted, LinePlanQuotaError } from './quota-alert.js';
 
 /**
  * Replace template variables in message content.
@@ -187,6 +187,11 @@ export async function processStepDeliveries(
       const sent = await processSingleDelivery(db, lineClient, fs, workerUrl);
       if (sent) sendCount++;
     } catch (err) {
+      // [Craval kzn] 返信予約枠に達した＝この tick はここで止める（次の tick で再評価。配信は失敗扱いにしない）
+      if (err instanceof LinePlanQuotaError) {
+        console.warn('[step-delivery] stopped: reached the LINE reply reserve');
+        break;
+      }
       console.error(`Error processing friend_scenario ${fs.id}:`, err);
       // A permanent LINE 4xx (invalid/unreachable recipient, invalid payload,
       // unauthorized channel, etc.) must not be recovered and retried forever.

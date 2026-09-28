@@ -15,7 +15,7 @@ import {
 } from '@line-crm/db';
 import type { LineClient, Message } from '@line-crm/line-sdk';
 import { addJitter, sleep } from './stealth.js';
-import { replyReserveExhausted } from './quota-alert.js';
+import { replyReserveExhausted, LinePlanQuotaError } from './quota-alert.js';
 
 export async function processReminderDeliveries(
   db: D1Database,
@@ -81,6 +81,10 @@ export async function processReminderDeliveries(
       // 全ステップ配信済みかチェック
       await completeReminderIfDone(db, fr.id, fr.reminder_id);
     } catch (err) {
+      if (err instanceof LinePlanQuotaError) {
+        console.warn('[reminder-delivery] stopped: reached the LINE reply reserve');
+        break;
+      }
       console.error(`リマインダ配信エラー (friend_reminder ${fr.id}):`, err);
     }
   }

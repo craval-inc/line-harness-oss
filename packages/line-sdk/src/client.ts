@@ -30,6 +30,15 @@ export function isLineMessageSendRequest(method: string, path: string): boolean 
   return method.toUpperCase() !== 'GET' && path.startsWith('/v2/bot/message/');
 }
 
+// [Craval kzn] 通数ガード（返信予約枠）。push / multicast の直前に呼ぶ（宛先数を渡す）。例外を投げたら送らない。
+// reply（無料）は対象外。broadcast / narrowcast は呼び出し側の配信前ガード（getLinePlanQuotaShortfall）が担う。
+// 未設定（null）なら本家と同一挙動。Worker の fetch/scheduled 入口で env から毎回セットする。
+export type LineSendGuard = (client: LineClient, recipients: number, path: string) => Promise<void>;
+let lineSendGuard: LineSendGuard | null = null;
+export function setLineSendGuard(guard: LineSendGuard | null): void {
+  lineSendGuard = guard;
+}
+
 export class LineSendDisabledError extends Error {
   constructor(path: string) {
     super(`LINE send disabled (LINE_SEND_DISABLED=1): ${path}`);
@@ -88,6 +97,11 @@ export class LineClient {
   ): Promise<{ data: unknown; headers: Headers }> {
     if (lineSendDisabled && isLineMessageSendRequest(method, path)) {
       throw new LineSendDisabledError(path);
+    }
+    if (lineSendGuard && method.toUpperCase() === 'POST' && (path === '/v2/bot/message/push' || path === '/v2/bot/message/multicast')) {
+      const to = (body as { to?: unknown } | undefined)?.to;
+      const recipients = Array.isArray(to) ? to.length : 1;
+      await lineSendGuard(this, recipients, path);
     }
     const url = `${LINE_API_BASE}${path}`;
 

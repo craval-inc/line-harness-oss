@@ -5,8 +5,10 @@ export {
   isLineSendDisabled,
   isLineMessageSendRequest,
   LineSendDisabledError,
+  setLineSendGuard,
 } from './client.js';
 export type {
+  LineSendGuard,
   FollowersInsight,
   FollowerIdsPage,
   MessageQuota,

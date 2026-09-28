@@ -36,6 +36,8 @@ const quotaAlertMocks = vi.hoisted(() => ({
   notifyQuotaAlert: vi.fn(),
   allTargetGuardAudience: vi.fn(),
   readPlanQuotaSnapshot: vi.fn(),
+  // [Craval kzn] 返信予約枠（既定0＝本家と同一＝1:1 push はプランクォータのチェック対象外）
+  getLineReplyReserve: vi.fn(() => 0),
   LINE_MONTHLY_LIMIT_MESSAGE: 'You have reached your monthly limit.',
 }));
 
@@ -1209,5 +1211,17 @@ describe('LINE plan quota guard (proxy bulk sends)', () => {
 
     expect(res.status).toBe(429);
     expect(quotaAlertMocks.notifyQuotaAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe('[Craval kzn] 返信予約枠がある環境の 1:1 push', () => {
+  test('予約あり: プロキシ経由の 1:1 push もプランクォータ（予約込み）の確認を通る', async () => {
+    quotaAlertMocks.getLineReplyReserve.mockReturnValueOnce(50);
+    quotaAlertMocks.getLinePlanQuotaShortfall.mockResolvedValueOnce({ limit: 200, consumption: 150, remaining: 50, audience: 1, reserved: 50 });
+    const { db } = fakeDb();
+    const res = await setupApp().request(pushRequest('acc-token'), {}, env(db));
+    expect(res.status).toBe(429);
+    expect(quotaAlertMocks.getLinePlanQuotaShortfall).toHaveBeenCalledTimes(1);
+    expect(quotaAlertMocks.getLinePlanQuotaShortfall.mock.calls[0][1]).toBe(1);
   });
 });
