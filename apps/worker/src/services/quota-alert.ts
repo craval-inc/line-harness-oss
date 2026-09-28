@@ -460,49 +460,70 @@ export async function notifyQuotaAlert(
  * 予約0・上限なしプラン・確認 API の失敗は何もしない（fail-open＝本家と同じく送信を止めない）。
  */
 const reserveSnapshotInflight = new Map<string, Promise<PlanQuotaSnapshot | null>>();
-/** アカウント（チャネルトークン）ごとのキャッシュキー。別アカウントの残数で誤って止めない。 */
+/**
+ * この isolate が予約枠ガードを通して送った通数（アカウント別・直近 RESERVE_DEDUCTION_WINDOW_MS）。
+ * LINE の消費数 API は概算で反映が遅れ、キャッシュも TTL で読み直す。スナップショットを書き換えて差し引くと、
+ * 遅れて返った照会結果やキャッシュの読み直しで差し引きが消える。そこで「API の残り − 直近に自分が送った数」で判定する
+ * （API 側が既に数えていれば二重に引くことになるが、予約枠を守る側に倒れるだけ）。
+ */
+const reserveDeductions = new Map<string, Array<{ at: number; n: number }>>();
+const RESERVE_DEDUCTION_WINDOW_MS = 15 * 60 * 1000;
+function recentReserveDeductions(key: string, now = Date.now()): number {
+  const kept = (reserveDeductions.get(key) ?? []).filter((d) => now - d.at < RESERVE_DEDUCTION_WINDOW_MS);
+  if (kept.length) reserveDeductions.set(key, kept);
+  else reserveDeductions.delete(key);
+  return kept.reduce((sum, d) => sum + d.n, 0);
+}
+/** アカウント（チャネルトークン）ごとのキー。別アカウントの残数で誤って止めない。 */
 function reserveCacheKey(client: PlanQuotaClient): string {
   const token = (client as unknown as { channelAccessToken?: unknown }).channelAccessToken;
   return `craval-reply-reserve:${typeof token === 'string' ? token : 'default'}`;
 }
+/** 予約枠の判定に使う残数照会（同時の照会は1本にまとめる＝事前判定と送信直前の判定で同じ結果を使う）。 */
+function readReserveSnapshot(client: PlanQuotaClient, key: string): Promise<PlanQuotaSnapshot | null> {
+  let pending = reserveSnapshotInflight.get(key);
+  if (!pending) {
+    pending = readPlanQuotaSnapshot(client, key).finally(() => reserveSnapshotInflight.delete(key));
+    reserveSnapshotInflight.set(key, pending);
+  }
+  return pending;
+}
 export async function consumeReplyReserveBudget(client: PlanQuotaClient, recipients: number): Promise<void> {
   if (lineReplyReserve <= 0 || recipients <= 0) return;
-  let snapshot: PlanQuotaSnapshot | null;
   const key = reserveCacheKey(client);
+  let snapshot: PlanQuotaSnapshot | null;
   try {
-    // 同時に来た送信は同じスナップショットを共有する（キャッシュ未作成時に各自が読むと、同じ残数で両方通ってしまう）
-    let pending = reserveSnapshotInflight.get(key);
-    if (!pending) {
-      pending = readPlanQuotaSnapshot(client, key).finally(() => reserveSnapshotInflight.delete(key));
-      reserveSnapshotInflight.set(key, pending);
-    }
-    snapshot = await pending;
+    snapshot = await readReserveSnapshot(client, key);
   } catch (err) {
     console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
     return;
   }
   if (!snapshot) return;
-  if (snapshot.remaining - lineReplyReserve < recipients) {
+  // await の後は同期的に判定→記録する＝同時に来た送信も1件ずつ差し引かれる
+  const usable = snapshot.remaining - recentReserveDeductions(key) - lineReplyReserve;
+  if (usable < recipients) {
     throw new LinePlanQuotaError({ ...snapshot, audience: recipients, reserved: lineReplyReserve });
   }
-  snapshot.remaining -= recipients;
-  snapshot.consumption += recipients;
+  const list = reserveDeductions.get(key) ?? [];
+  list.push({ at: Date.now(), n: recipients });
+  reserveDeductions.set(key, list);
 }
 
 /**
  * [Craval kzn] 1通ずつ送る定期配信（ステップ配信・リマインダー）の前ガード。
- * 予約枠が設定されていて「残り − 予約枠 < 1」なら true（＝今回の tick は送らない・次の tick で再評価）。
+ * 予約枠が設定されていて「残り − 直近に送った数 − 予約枠 < 1」なら true（＝今回の tick は送らない・次の tick で再評価）。
  * 予約0・上限なしプラン・確認 API の失敗は false（fail-open＝本家と同じく送信を止めない）。
  */
 export async function replyReserveExhausted(client: PlanQuotaClient): Promise<boolean> {
   if (lineReplyReserve <= 0) return false;
+  const key = reserveCacheKey(client);
   let snapshot: PlanQuotaSnapshot | null;
   try {
-    snapshot = await readPlanQuotaSnapshot(client, reserveCacheKey(client));
+    snapshot = await readReserveSnapshot(client, key);
   } catch (err) {
     console.error('LINE plan quota check for reply reserve failed (fail-open):', err);
     return false;
   }
   if (!snapshot) return false;
-  return snapshot.remaining - lineReplyReserve < 1;
+  return snapshot.remaining - recentReserveDeductions(key) - lineReplyReserve < 1;
 }

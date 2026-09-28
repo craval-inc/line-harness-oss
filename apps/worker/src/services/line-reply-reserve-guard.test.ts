@@ -78,6 +78,17 @@ describe('consumeReplyReserveBudget', () => {
     await expect(consumeReplyReserveBudget(new LineClient('t-acct-B'), 1)).resolves.toBeUndefined();
   });
 
+  test('遅れて返った照会・キャッシュの読み直しでも差し引きは消えない（事前判定→送信→事前判定）', async () => {
+    stubLine(200, 149); // 残り 51・予約 50 → 1通だけ
+    setLineReplyReserve(50);
+    const client = new LineClient('t-late');
+    const { replyReserveExhausted } = await import('./quota-alert.js');
+    const [pre] = await Promise.all([replyReserveExhausted(client), consumeReplyReserveBudget(client, 1)]);
+    expect(pre).toBe(false);
+    await expect(consumeReplyReserveBudget(client, 1)).rejects.toBeInstanceOf(LinePlanQuotaError);
+    expect(await replyReserveExhausted(client)).toBe(true);
+  });
+
   test('予約0（未設定）は何もしない（API も呼ばない）', async () => {
     const fn = stubLine(200, 200);
     await consumeReplyReserveBudget(new LineClient('t-zero'), 5);
