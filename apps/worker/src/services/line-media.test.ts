@@ -417,7 +417,23 @@ describe('CODEX レビュー反映（並行・準備中・取消後の削除失�
     await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS + 10);
     expect(r2.objects.has('line-media/x/m1-late.jpg')).toBe(false);
     expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(1);
+    // 保持期間は「回収開始（T0+猶予+1）」から数える＝作成から7日ではまだ残る
     await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_TOMBSTONE_MS + 1);
+    expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(1);
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + MEDIA_WAL_GRACE_MS + MEDIA_WAL_TOMBSTONE_MS + 2);
     expect(q('SELECT count(*) AS n FROM line_media_writes')[0].n).toBe(0);
+  });
+
+  test('回収中は最後に試した時刻の古い順に巡回（先頭が削除失敗し続けても後続を処理する）', async () => {
+    for (const k of ['a', 'b', 'c']) {
+      db.raw.prepare(`INSERT INTO line_media_writes (r2_key, line_message_id, committed, created_at, reclaim_started_at) VALUES (?, 'm', 2, ?, ?)`).run(`line-media/x/${k}`, T0, T0);
+      r2.objects.set(`line-media/x/${k}`, { body: new Uint8Array(1) });
+    }
+    const origDelete = r2.delete.bind(r2);
+    r2.delete = async (k: string) => { if (k.endsWith('/a')) throw new Error('stuck'); return origDelete(k); };
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 1, 1); // 1件ずつ: a（失敗）
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 2, 1); // b
+    await purgeUnsentMedia(db.asD1(), r2.asR2(), T0 + 3, 1); // c
+    expect([...r2.objects.keys()]).toEqual(['line-media/x/a']);
   });
 });

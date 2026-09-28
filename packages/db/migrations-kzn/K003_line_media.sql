@@ -40,7 +40,9 @@ CREATE INDEX IF NOT EXISTS idx_line_media_unmirrored ON line_media (mirrored, mi
 CREATE TABLE IF NOT EXISTS line_media_writes (
   r2_key          TEXT PRIMARY KEY,
   line_message_id TEXT NOT NULL,
-  committed       INTEGER NOT NULL DEFAULT 0,
-  created_at      INTEGER NOT NULL
+  committed          INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL,
+  reclaim_started_at INTEGER,
+  last_reclaim_at    INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_line_media_writes_uncommitted ON line_media_writes (committed, created_at);

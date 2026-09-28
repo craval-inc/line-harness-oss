@@ -231,7 +231,12 @@ async function readLimited(res: Response, maxBytes: number): Promise<Uint8Array 
 export const MEDIA_LEASE_MS = 2 * 60 * 1000;
 /** 未確定の先行ログを回収に回すまでの猶予（取得権より十分長く）。回収と確定は DB 上で排他（下記 WAL_* 状態）。 */
 export const MEDIA_WAL_GRACE_MS = 30 * 60 * 1000;
-/** 回収中の記録を残して R2 削除をやり直し続ける期間（遅延した put が後から完了しても消せるように）。 */
+/**
+ * 回収中の記録を残して R2 削除をやり直し続ける期間（回収開始から数える）。遅延した put が後から完了しても消せるように。
+ * 前提: fetchLineMedia は Webhook 応答後の waitUntil（応答後30秒上限）と Cron（scheduled・15分上限）からだけ呼ぶ
+ * ＝クライアント接続に紐づかない実行なので put の完了は最大でも十数分。7日はその上限より十分長い。
+ * 取得権の期限を過ぎた実行は put 自体を始めない（下の fetchLineMedia）。
+ */
 export const MEDIA_WAL_TOMBSTONE_MS = 7 * 24 * 60 * 60 * 1000;
 /** line_media_writes.committed の状態。0=書込み中 / 1=確定済み（DB が参照）/ 2=回収中（確定不可・R2 から削除し続ける）。 */
 export const WAL_PENDING = 0;
@@ -299,6 +304,10 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
 
   const contentType = (res.headers.get('Content-Type') ?? 'application/octet-stream').split(';')[0].trim().toLowerCase();
   const key = mediaKey(row.user_hash, row.line_message_id, extFor(contentType, row.file_name), token);
+  // 取得権の期限を過ぎていたら書き始めない（別の実行が取り直している可能性・遅延 put の芽を摘む）。
+  if (now() > t0 + MEDIA_LEASE_MS) {
+    return markRetry(db, row, 'lease_expired', now(), token);
+  }
   // 先行ログ: R2 に書く前に書込み意図を記録する（確定されなければ Cron が R2 から消す＝中断・例外でも孤立しない）。
   try {
     await db
@@ -335,7 +344,7 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
 
   // 確定できなかった（取消された・期限切れ後に別の実行が取り直した）: このキーは実行ごとに一意で DB から参照されない。
   // 自分の書込みを消して先行ログも消す。削除に失敗したら先行ログが残り、Cron（purgeUnsentMedia）が回収する。
-  await discardWrite(db, deps.r2, key, row.line_message_id);
+  await discardWrite(db, deps.r2, key, row.line_message_id, now());
   const cur = await getMediaRow(db, row.line_message_id);
   return cur?.status === 'unsent' ? 'unsent' : 'skipped';
 }
@@ -344,10 +353,13 @@ export async function fetchLineMedia(deps: FetchMediaDeps, lineMessageId: string
  * 確定されなかった書込みを回収する: 先行ログを「回収中」にしてから R2 を消す（記録は残す＝Cron が期間中は消し直す）。
  * 確定済み（1）の記録には触れない。回収中へ切り替えられなければ（確定済みだった等）何もしない。
  */
-async function discardWrite(db: D1Database, r2: R2Bucket, key: string, lineMessageId: string): Promise<boolean> {
+async function discardWrite(db: D1Database, r2: R2Bucket, key: string, lineMessageId: string, now: number): Promise<boolean> {
   const mark = await db
-    .prepare(`UPDATE line_media_writes SET committed = ${WAL_RECLAIMING} WHERE r2_key = ? AND committed IN (${WAL_PENDING}, ${WAL_RECLAIMING})`)
-    .bind(key)
+    .prepare(
+      `UPDATE line_media_writes SET committed = ${WAL_RECLAIMING}, reclaim_started_at = COALESCE(reclaim_started_at, ?)
+        WHERE r2_key = ? AND committed IN (${WAL_PENDING}, ${WAL_RECLAIMING})`,
+    )
+    .bind(now, key)
     .run();
   if ((mark.meta?.changes ?? 0) === 0) return false;
   try {
@@ -381,22 +393,34 @@ export async function purgeUnsentMedia(db: D1Database, r2: R2Bucket, now: number
       )
       .bind(cutoff),
     db
-      .prepare(`UPDATE line_media_writes SET committed = ${WAL_RECLAIMING} WHERE committed = ${WAL_PENDING} AND created_at <= ?`)
-      .bind(cutoff),
+      .prepare(
+        `UPDATE line_media_writes SET committed = ${WAL_RECLAIMING}, reclaim_started_at = COALESCE(reclaim_started_at, ?)
+          WHERE committed = ${WAL_PENDING} AND created_at <= ?`,
+      )
+      .bind(now, cutoff),
   ]);
+  // 回収中（2）は「最後に試した時刻」の古い順に巡回（先頭が失敗し続けても後続に手が届く）。記録は回収開始から7日で消す。
   const reclaiming = await db
-    .prepare(`SELECT r2_key, line_message_id, created_at FROM line_media_writes WHERE committed = ${WAL_RECLAIMING} ORDER BY created_at ASC LIMIT ?`)
+    .prepare(
+      `SELECT r2_key, line_message_id, COALESCE(reclaim_started_at, created_at) AS started FROM line_media_writes
+        WHERE committed = ${WAL_RECLAIMING}
+        ORDER BY COALESCE(last_reclaim_at, 0) ASC, created_at ASC LIMIT ?`,
+    )
     .bind(limit)
-    .all<{ r2_key: string; line_message_id: string; created_at: number }>();
+    .all<{ r2_key: string; line_message_id: string; started: number }>();
   for (const w of reclaiming.results ?? []) {
+    let ok = false;
     try {
       await r2.delete(w.r2_key);
-      if (w.created_at <= now - MEDIA_WAL_TOMBSTONE_MS) {
-        await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ? AND committed = ${WAL_RECLAIMING}`).bind(w.r2_key).run();
-      }
+      ok = true;
       n++;
     } catch (err) {
       console.error(`[line-media] reclaim failed msg=${w.line_message_id}: ${err instanceof Error ? err.name : 'error'}`);
+    }
+    if (ok && w.started <= now - MEDIA_WAL_TOMBSTONE_MS) {
+      await db.prepare(`DELETE FROM line_media_writes WHERE r2_key = ? AND committed = ${WAL_RECLAIMING}`).bind(w.r2_key).run();
+    } else {
+      await db.prepare(`UPDATE line_media_writes SET last_reclaim_at = ? WHERE r2_key = ?`).bind(now, w.r2_key).run();
     }
   }
   for (const r of rows.results ?? []) {
