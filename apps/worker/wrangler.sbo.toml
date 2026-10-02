@@ -37,7 +37,7 @@ bucket_name = "line-harness-sbo-images"
 # 本家 v0.24 の Durable Object 定期実行（TENANT_SCHEDULER・毎分）は使わない＝現行どおり Cron 5分/6時間。
 # （バインディング省略時は DO 経路は何もしない。scheduled.ts が Cron から同じ処理を回す）
 [triggers]
-crons = ["*/5 * * * *", "0 */6 * * *"]
+crons = []  # 2026-10-02 停止: セールスキャストのLINEは salescast Worker に移行・旧トークン失効
 
 [vars]
 WORKER_NAME = "line-harness-sbo"
