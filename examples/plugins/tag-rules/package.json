@@ -12,6 +12,6 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": { "@line-harness/sdk": "0.24.0" },
-  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.9.3", "wrangler": "^4.0.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.9.3", "wrangler": "^4.147.0" },
   "engines": { "node": ">=22" }
 }

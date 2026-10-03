@@ -90,3 +90,15 @@ MIRROR_URL = "https://anami-pat.jp/api/line-harness-event"
 #   MIRROR_SECRET                  # きずな Pages の LINE_HARNESS_MIRROR_SECRET と同値。**必須**（未設定だと転送は保留＝mirrored=0 のまま溜まる）
 # 設定しない: LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET / STRIPE_* / CF_API_TOKEN
 # ADMIN_ORIGIN は secret（https://line-harness-kzn-admin.pages.dev）。ADMIN_COOKIE_SAMESITE は未設定（ALLOW_CROSS_SITE=true で None になる）
+
+# Workers Logs / Workers Issues（API で有効化済みの設定を明記。書かないと次回 deploy で戻る）
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.issues]
+enabled = true

@@ -115,3 +115,15 @@ class_name = "TenantScheduler"
 
 [env.production.triggers]
 crons = ["* * * * *", "0 */6 * * *"]
+
+# Workers Logs / Workers Issues（API で有効化済みの設定を明記。書かないと次回 deploy で戻る）
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.issues]
+enabled = true

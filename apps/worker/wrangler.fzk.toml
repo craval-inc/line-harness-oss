@@ -56,3 +56,15 @@ ADMIN_ALLOW_CROSS_SITE = "true"
 
 # 既存 secret（変更しない）: LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_ID /
 #   LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET / LIFF_URL / API_KEY / ADMIN_API_KEY / WORKER_URL / ADMIN_ORIGIN
+
+# Workers Logs / Workers Issues（API で有効化済みの設定を明記。書かないと次回 deploy で戻る）
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.issues]
+enabled = true

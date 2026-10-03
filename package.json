@@ -33,11 +33,11 @@
   },
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "wrangler": "4",
+    "wrangler": "^4.147.0",
     "tsx": "^4.21.0",
     "vitest": "^2.1.0"
   }
