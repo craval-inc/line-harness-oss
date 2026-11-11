@@ -24,8 +24,8 @@ importers:
   apps/liff:
     dependencies:
       '@line/liff':
-        specifier: ^2.24.0
-        version: 2.28.0
+        specifier: ^2.31.2
+        version: 2.32.0
       hls.js:
         specifier: ^1.6.16
         version: 1.6.16
@@ -1503,234 +1503,249 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
-  '@liff/add-to-home-screen@2.28.0':
-    resolution: {integrity: sha512-vzlQFyCtMvYulJ2IakK1H3NJSnvm9XPdDvO7GvME/ifYAUYoTPjmSinnsraEDgwG6I5AqXZ5uzuWUJfE5sPuYA==}
+  '@liff/activity@2.32.0':
+    resolution: {integrity: sha512-LbnPUi9oq+kz///E+I6qfIntV8Xf6+dnzZ8GxG0BW68u0SK4ZWAuKDdOCHBXzDa+Yj9pK3KzBpmQFsFK5k2xUw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/analytics@2.28.0':
-    resolution: {integrity: sha512-fCojrA+tA5ju+9xHZ20zvQVQsUDix86mNXczmU4ncHd10OT9lVBjC4UMEBR8gJSwRdAn+ndgNrwnoEcqPYuNyw==}
+  '@liff/add-to-home-screen@2.32.0':
+    resolution: {integrity: sha512-f5MsJlp3TTK+rHsmM0R751awROts27Ptj7E7EiOkVGu5sAceyoI1CV7pmABJdNiD9qwYTmJGkpeQ2UrrZ/W6VA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/check-availability@2.28.0':
-    resolution: {integrity: sha512-m+mrlvWTROuG/awdAEMAkyi4WdnuJBYx40MNlxs3X6UNOrbW+pGr7REbEa9fDjU124yp8WM5f+RZ+zkNz8wpww==}
+  '@liff/analytics@2.32.0':
+    resolution: {integrity: sha512-qJtzSuo9q6C7Fh2G0Tkp3q8YW3/YKwxpg3Lw8Keep04X6e/EoltB0Ufo5WJV/8r3N3Hjl7xeWI+khGvLCHzdKA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/close-window@2.28.0':
-    resolution: {integrity: sha512-OgZJq7QD4BMIAIv/0BZSEchGSeuiCeB8cq0ByZSqwP0Titzp7CvdN85zcIsO0G/apxMfaDhH9cMQC4HAuexvPQ==}
+  '@liff/calendar@2.32.0':
+    resolution: {integrity: sha512-W1ukNTYPM7+SpVFVpvS/jcbBL7CSZlBeZya405qp0VwRuskfEqlpogd+2Rw89WfYpVAsroQNPAyUFyJrDWcv+A==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/consts@2.28.0':
-    resolution: {integrity: sha512-/cA8xTuy0DJh7DcwyCFHmYZmONzIWBuEZSWkK8g+6odw97eoLDbczpzUoE9LtzMVrq2XcSZyZ374fLbUt7BSYQ==}
+  '@liff/check-availability@2.32.0':
+    resolution: {integrity: sha512-/krGe/ItSVvkixVJcwB1r5OH2HKmtxxixaGNRoLtbCPk01VcDJexIrnyC559IDnImZv/pwu/dNZspaKjcMcK4w==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/core@2.28.0':
-    resolution: {integrity: sha512-ogcun/uVvJ4h809N2lXT32mRjsUyTGfz6Q4wXPpXFCUzm1U9MYxorae91THJnhwLUeyButuwTZNRk1pX33JfEQ==}
+  '@liff/close-window@2.32.0':
+    resolution: {integrity: sha512-xeoAxNEAPHsEyPN50aYnKoKUkGgU8t1ixr5QOCqcTsaQvwtj7x8PiCSGKlGAUY+bJGSi4EV4CTPvxdNXisxnhQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/create-shortcut-on-home-screen@2.28.0':
-    resolution: {integrity: sha512-79czfBO2poz9mEtL0P7VQVzToC51xeaWSnZ3cNkYKwvmLUwDmKLh20FHXkvcvrXNUgb8dhK1UtHPMCix6ZTfsQ==}
+  '@liff/consts@2.32.0':
+    resolution: {integrity: sha512-ldGaFbjjAIg0BxvEmyDFRVCMVE1PAlfUGypIhsn0OzDpd1gPvHMjQ8v/SaZuRU+AQqx3LcqT+nWVTbU6MBUXfQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/extensions@2.28.0':
-    resolution: {integrity: sha512-WewuRu6CDEDUNA2yMUidVUO4qRIsbj0RYJ4RQhZJPlmCiQ6sZd9/5DjwCFqznzvvBG9rhVsLTwyqU/WmvUXy0w==}
-
-  '@liff/get-advertising-id@2.28.0':
-    resolution: {integrity: sha512-5D1XFwzw1O2klCW0lBWtiPKOtqb2AnznrSk45gkt0b3+JtmGrmmxNu1KHR215pAC6RsqRxC3yloFXvUS4f48EA==}
+  '@liff/core@2.32.0':
+    resolution: {integrity: sha512-BCFN3s1YUP75HShPJFgG1847otBVr90G7NbJtr+Hzx6sJjg6CwiMkO1XP6arcK7q2dLxqqO68kaAc2Kq3Nsv/w==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-app-language@2.28.0':
-    resolution: {integrity: sha512-JqsNTTL+apeBNLqQ16Powg85ApqYMXVPxhtSOedRw4Q6AywJvcMu3sutc9TtBpFZeeno958dpmTyFN55mhNm5g==}
+  '@liff/create-shortcut-on-home-screen@2.32.0':
+    resolution: {integrity: sha512-dapBKeNduB3orGkDx/OiHt+yQPa+vICQCREUvZQZatyGafonkDKmnS05So4FEohM8JTGQ44TYVNJHI7St4swvQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-friendship@2.28.0':
-    resolution: {integrity: sha512-q6SyMV4QMOmXl8I5QNH5dpNiBnSX6u9O3B6jzKHga1T3OA0dhQLYVU++Nh0njzTsA0mlvFylUZIRrwgMmXuRdg==}
+  '@liff/extensions@2.32.0':
+    resolution: {integrity: sha512-RvaMA5EzMA3bkrtFkbXMLJa/CbqhI3B2CmgkhsjqlCfeZWy1z32pARsfz7Nn+k6rDuhKTNgSbVS3ZgqXvR+eRQ==}
+
+  '@liff/get-advertising-id@2.32.0':
+    resolution: {integrity: sha512-rYJTpDjU6nOy6QtAZcwlgF7V/TaCbKdodN8epEBjUj0tyvEVH8KjvSvfSrqRHQA50YOaATJnFJzcHeUPiEv89A==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-language@2.28.0':
-    resolution: {integrity: sha512-oHzznZ0Y4IInHlWvGUBMy8U7AT1HKVXyttEPbCy792lae9pIZuqa9hvdndxo6fC4nOcKmu50uzNiziykmQVa0A==}
+  '@liff/get-app-language@2.32.0':
+    resolution: {integrity: sha512-UefgYcHq5aHIghQJ5pe7cjqlOoA72MaTL8FEMoJW6DBKcOGmwuh+BxnL1Amvs8nwsDA/xcBQ3pZ4ggTgCTBeIA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-line-version@2.28.0':
-    resolution: {integrity: sha512-T196HgEp4tvjcWhZw0USKPOeQV3wMwfz35gVr99YtkC0v4g1UqLe9HuyXMhiGuswAybWJNwuKJqiMmWDHCXn9A==}
+  '@liff/get-friendship@2.32.0':
+    resolution: {integrity: sha512-MFfqlKqOIl62CULix8fG+HshaGkD2UulJpM/iDFg8H/oCVzORpFBr6N1px3kera850d7vnKXlUbAqFCWt2xwVw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-origins@2.28.0':
-    resolution: {integrity: sha512-qqR/dQFfXdQBjQO1pv2ljm/EzR7iLggKOBdMt6Mna64XosIuoQ95EesVaZlfmNuKFZJfMmSsh6ZEzOmMUFSPIQ==}
+  '@liff/get-language@2.32.0':
+    resolution: {integrity: sha512-NPF8leVHiunS8WQDGzeI7w/KHtuyP1K6ZaLZKYsbcQN8rY3SURILacbkNxGTeN8uSne3CaHvH/UF9JqdXkeyqg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-os@2.28.0':
-    resolution: {integrity: sha512-sxRO85jREUSr6gT0h1hc4nPVKsNlLwDqBcAANSlu/e0bPfzBMzOOAlalOXHQrtTC0TgffFgwvIao0CkHYnNZlQ==}
+  '@liff/get-line-version@2.32.0':
+    resolution: {integrity: sha512-7dnwaRKmxFDzsNldrvioN8pMs7hG1uy9z6MAqj+2B/y2V1uN7ahic3ewAW0xCAQjmp2KiD2CMawg3ePYDKFwrQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-profile@2.28.0':
-    resolution: {integrity: sha512-zlqEcxMIc+GOUxkDw+OpvnLPrtyj4Ez5pd6XEWdGwJDj7KP+jp8CetbOkULbU6P9F5un02IRZyh1Z9ABBouzmQ==}
+  '@liff/get-origins@2.32.0':
+    resolution: {integrity: sha512-OqcX8kDjd2KQQJltmb1OK4w36yqO8PcNQOrsqRlkFIr9jyk7B6b5jt4XEYq4V6u3WeKN6VihF/Mfys3WLyAKqg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/get-version@2.28.0':
-    resolution: {integrity: sha512-KjUTIc2InOBKS2WYzg1gGy2Y54cYXJqsxvhTebuMW4FjRgy/g9fpplYxVtikOclj1+2LxaFYb7jlGKfBxpA6hw==}
+  '@liff/get-os@2.32.0':
+    resolution: {integrity: sha512-W+G6493U4cphODghylNNNZ29pqHWkRBU8Lo8wksVJVH1qRaMRD5cqsNUIYmGi+ScECD5JaOJ7q/5/Fl4vP/5Uw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/hooks@2.28.0':
-    resolution: {integrity: sha512-jjswWkpN5j+hExXYVMREhMFoBjTdEfae7Sq0F4MI7vjGAAhcCUiDqlWdD3AWeG6fWRRNR7IlIG9v0e+Rdfj1kw==}
+  '@liff/get-profile@2.32.0':
+    resolution: {integrity: sha512-o7pa+cIlPWW3DBb79H4Fvno5uzdTgXnjK/YIfKIhPzeB07aHmx/LvIs4zOxY5alQAqH3RLAs1XHepOhMrSnr/w==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/i18n@2.28.0':
-    resolution: {integrity: sha512-Fat8tdDagaeVxtu2Yte8kyoLDfOwSYQcB3uzqwgGnha/FniDkp8HaKx8itiGSZimNC59WD1Sb5UfTAbQrke0wA==}
+  '@liff/get-version@2.32.0':
+    resolution: {integrity: sha512-CHX0mHey+uAb9B8G75+vhZz51Y/xt9xbOjY2oPg+D95NHIueEco4oK4f/MKLibJ5rBQnmti2O1OsUltZChRh7w==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/iap@2.28.0':
-    resolution: {integrity: sha512-vqijftPXZBRi+mYjmc2XV4sybZp1jbSBP2FJl7IX2CfwkVOubly5ty8VjLeYa1ytX7UEMrN5omPcqCRwyYpHwQ==}
+  '@liff/hooks@2.32.0':
+    resolution: {integrity: sha512-5RTPW5Tt9GTu2LmLRhlHHtztwMjR8pkwWogTaaS52v+tv1hOZugX74rREFcjRF2MPR4C0E2oHTeUVc50J8YSsw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/init@2.28.0':
-    resolution: {integrity: sha512-SgJ0De3eLvRbw6tMtzmQY/QK8tIQkc4VdgJQ4Mb2vS6ugMOtlzuealQO5dVlDIUNvrmgENuw1C0y/PKAsgyogg==}
+  '@liff/i18n@2.32.0':
+    resolution: {integrity: sha512-QdyXozGUlZSVvsM6uF6tszhh/9AYA+UuaEHitvgY0DxKbepIZ4rpPxp7agg8p1PV5YiMF46v7/79TXTBIeg+fg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/is-api-available@2.28.0':
-    resolution: {integrity: sha512-RAhW3k9x9KI35A2YG10VQHq2+Z0nqbSIfd5fJD9zdkRLVN45zylDW9r0oXW768S0TkNuAgPDhrcH8fI0kF5kEw==}
+  '@liff/iap@2.32.0':
+    resolution: {integrity: sha512-EKvIf8fqbVUBZjtTxZ1E5Nat8vR+0vzTgcRLNl5EK3oUrWW2HRoLhsv0Vt7GXOszcNHyOZCptFax9WP9CXdfRA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/is-in-client@2.28.0':
-    resolution: {integrity: sha512-Qgi8WriZZZ/LEltW/7SnKk1hNWDZSbQaNnPf3wywr9GPU2Ht8GgiFFPF8kB550LILCjlkMGBgiTWERVuN3dOyg==}
+  '@liff/init@2.32.0':
+    resolution: {integrity: sha512-Y4XDk+SnZ7RfES4Iu9CKlFRBFj4Zc73S8lgu0gO4b9zFSC0ay37SE7dtbmtdVPJIjb9SVeczOkwkS1lVrBsJKA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/is-logged-in@2.28.0':
-    resolution: {integrity: sha512-WS8qwHTl0m6NDwVCQkaIEx73hFbDCB6vgM2hxZ+iql97SwG0PRdMWu2iWzaQYqsKzhac7Ccyf14YtlcjfUB2JA==}
+  '@liff/is-api-available@2.32.0':
+    resolution: {integrity: sha512-lQbMhs+0ykYxGnE0qYAKgntfXx9PJTEX0mI5wzqS3j8VBVySHx3rQTwUK5PZmpu/p02jqMeePNoH+iJ+mxNmew==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/is-sub-window@2.28.0':
-    resolution: {integrity: sha512-Wx1TA4hhtOwouo9tMOH7hVeFkRvcvf/Qsf0wCaydspjMCT3bgGxb6+iHFU+Kr2b03++dVdWPTF7bxX8vC0ZswA==}
+  '@liff/is-in-client@2.32.0':
+    resolution: {integrity: sha512-PKd7ZWFSmKSPgGjf1WOJqJKuNeftigyrIyPYC3Q/oFg1NLS439dYXrS10/9xt4vx79n3nVCMYvGHshs/qb3tPQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/liff-types@2.28.0':
-    resolution: {integrity: sha512-0mKEDCj4BiwwJdBDzkkCL2lpzDvjCGIofi385lL3NZkMUjE/r6iGpJSxyOHcaOB5tLK+aRDhtBG4DhJuh6QTgQ==}
+  '@liff/is-logged-in@2.32.0':
+    resolution: {integrity: sha512-Ly13yJG1EZ0gkcccRGUz/1UjCajVFtae4mYJqSXgChTRzkXTDkRTzS8+KwpQcF0B0Y9QBxixkO3D5iTKuMgOkQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/logger@2.28.0':
-    resolution: {integrity: sha512-uI8D5YN4qqaNM3MPUsxIWksKqsK22W9i2nOK9dl/delXQelHDBa7byrJ/476E026Uw/F3fcZH8JC00nul42ZXg==}
+  '@liff/is-sub-window@2.32.0':
+    resolution: {integrity: sha512-jlNnqMyHp5czhY8MaiejCSmKyiaG3IFUWIfWVApTCF/ytD6oOR/YH0fppK7JpJFCHfc02yuWyQUsRqu/+lHw/w==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/login@2.28.0':
-    resolution: {integrity: sha512-QwBgHdrFpdLRqxloOBJxiPCgejlLHIsM82FtK/ZEb0J9EqHg+UqFx1tGGshtlHOeak+YOw9UnvJTjSpPoAiXVw==}
+  '@liff/liff-types@2.32.0':
+    resolution: {integrity: sha512-jcAkRmGwlxx7hSMF+zFJYYg3p/J3e30AhKKdqz8cmrJf1hwMDUuYeG/B7BDiNKaOMJe3jbM/tkjhP1hQV71uJg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/logout@2.28.0':
-    resolution: {integrity: sha512-gciavxx3J8azkWh7pja8X36SDrPlOLyKy2GGd4D8obNkwErLpBoEWKR0sQm1sBbuPxaRe58S6MgLdA8rZ4vK5w==}
+  '@liff/logger@2.32.0':
+    resolution: {integrity: sha512-yludChRxSTvOAkBwjEfKPsIWKwh72g8V5wxADd5EmvY5+8eMB/RSoxXEU8+I8pUVQqyqJQiFQqXlbdgUwbyYPw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/message-bus@2.28.0':
-    resolution: {integrity: sha512-/PcSneTQRxxIqWNTKsU5r/v10wcjtl6tSgIwmxpnk15taniCZar15PF1WoO7YLqX1ggM46HOBpov17W0x0HJkQ==}
+  '@liff/login@2.32.0':
+    resolution: {integrity: sha512-9G6DiexFHwUlwznqZkRkBlkJQ452RA9/e08XjND9UvU1ceGL8Q4vflwI+dhRr1qQ5RBx1YVXUks/0qJEbQ936Q==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/native-bridge@2.28.0':
-    resolution: {integrity: sha512-nMry18h1Lb1rOahjhbxjE6UkooKAWgtpfD4SmNiaj7WcFdU2VQ7tuwTRlziB3YwyWRYLSRUe9HSJPxajGd5JVw==}
+  '@liff/logout@2.32.0':
+    resolution: {integrity: sha512-PZzWu8axI/WVqsjJv4+fC7hJ/kVFrq6vnE+OSMTvg8w7ddlKWg8vicGo/Ry2qWZCzECIxCEQ0PYpiEt5CMPnUQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/open-window@2.28.0':
-    resolution: {integrity: sha512-5c7WR9iBngfymiu+IkYgN78WWzvrsIJZJk12Lr8RzD3xjOUKWYDsKxZX6glCVEDXtklF/MI06xTroOGyhx8C6g==}
+  '@liff/message-bus@2.32.0':
+    resolution: {integrity: sha512-5auVx8AOLLbzl4sBhDiFxV5mh4ou66GyGASRKoDBWHhZq9zYWIClNDZp27o+oIyW3TOMCUIuJZxiTCBQ5k7FTA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/permanent-link@2.28.0':
-    resolution: {integrity: sha512-DL1fGqQ63IQjGNltDFZhN3VCTYHBayTt4b13t1B/tk+ryaXgzEuadetb6k5ZJUACjaMt68z25fC9oSxapFIyjQ==}
+  '@liff/native-bridge@2.32.0':
+    resolution: {integrity: sha512-ZCeM3ZhFq10EOtdB1a3G3inTUZXYd6aBMVgp7djpn7stzHD0pZisDo6B9FmZLfnkI3gSl+aYk8SxK7qBG6mhZw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/permission@2.28.0':
-    resolution: {integrity: sha512-KwjrXPuOVkiv9cI5t8rRyPivdJYzkPfX1Rhxs3nGx/JFUA4zUbrUPo2vOl2eMkvfc2QskCryavEkqOChL64RiA==}
+  '@liff/open-window@2.32.0':
+    resolution: {integrity: sha512-89yfjNp+8V5a/HS8GkHDI9CXI898GSQZUqQRZT5jyp94Mh6Bp0+qUR7RTzRG+zB3WLVbKp20LuhTbifH3oy8Zw==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/ready@2.28.0':
-    resolution: {integrity: sha512-i6ODZZ8aZvNPqfFD33sbnKYcvm+yGZWpsJy9d59GiXa9mAtHGJPoeMsCHzwikQZqeWm+GiHrKcZmZ3ur10UwFQ==}
+  '@liff/permanent-link@2.32.0':
+    resolution: {integrity: sha512-XBVZwNVYxT9mYbP1yM0oGlu1cmTGfg3o9sCL7Xzswy8cmftkVwkJvEqp+hOht0HuIuaDiC+NTq27Fz/V/eCY4Q==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/request-friendship@2.28.0':
-    resolution: {integrity: sha512-Zh5a5oB16deBZOe7MN4IiHclFMAfChuuVFXnT9PPqluF48LIORooMK9Lkfa8XlFm/jr76akc8JJ2+ITpOB7l9A==}
+  '@liff/permission@2.32.0':
+    resolution: {integrity: sha512-4uUutvcHTo+esIyonHDVcBURCX2vy24dQtXKmgwkj8xTmLE720RqHxT2brHFjpmbxuMrFMisym2MD7b1WQJwwQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/scan-code-v2@2.28.0':
-    resolution: {integrity: sha512-NBSZHiY/s+nJ8SgpwWrvjZUIRY56y872inci3XWYVnZc7xBYtP09pcoTO1MXq9FuOLHAJ24GJtdQoDgDJj7A1g==}
+  '@liff/ready@2.32.0':
+    resolution: {integrity: sha512-Lxnbj2nJXZk3y3jMFgBFtx4xIRCuZ1IZZIoOEg2zUIGqDm0M1vfDJ8Ovgaf1KpscfAMyTCI4GGnkMAv1/OdQyQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/scan-code@2.28.0':
-    resolution: {integrity: sha512-fWK36Zjt88wr3zADZiVjZx909VDe2N1yKZ7Pc9YoE3HpbVzft4/KC7A5POlj+LsAKBQX3Y19YK5dOr6iNBuQsA==}
+  '@liff/request-friendship@2.32.0':
+    resolution: {integrity: sha512-pvSPI7No+oc8RZ/G7MEh3Q1U/mW0vM0FPwx8d5y5uEfmveMbc3UrLf3DvqohlCwmE+VyXykR/nFrKYkweT6vkQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/send-messages@2.28.0':
-    resolution: {integrity: sha512-UFRCo4+wpgOcJOxV63hkOAJTqfsfvmGLSSHNtyVsIed8+V+qWIKl7UZWT8aSYCOq4tlnuFlipPuh3uSKSdyMIg==}
+  '@liff/scan-code-v2@2.32.0':
+    resolution: {integrity: sha512-OtNcvYDayrrnGOdxRY6nk2WTSlN3k89vThe3/5uKynqZBrJkKB2BkspOMd9iyjPzZCXjp8/O+fZMU8pPJjAFxQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/server-api@2.28.0':
-    resolution: {integrity: sha512-7Q6HQrbub6fnDY4tjD7OC2D5LizPr8C0d4zlBi8SGUOBEkiAG3k2GhIfBHp0ehxMOHWfaViRCH/v0rhAd8/4qg==}
+  '@liff/scan-code@2.32.0':
+    resolution: {integrity: sha512-WKAKOfwgBiJFzHe2KO/7+FbN5NcrAUVzr8ZqvdFNmR29He7z9kHULS36TPpdg9gWZvkqhsRMXWrnu/8UBuNewg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/share-target-picker@2.28.0':
-    resolution: {integrity: sha512-HR2wy+BKOC6MU+8LJ8faapV0XMPrIh8DFOL6kLDTfcqOd3aZsY1LqZajfX46BB4VSw7nz5ubKTkHsP2kgNMggQ==}
+  '@liff/send-messages@2.32.0':
+    resolution: {integrity: sha512-Jzm7JyqnLJcQSuUAUif0ypaTkVKRdT7/tINk4SPMmmZQbt6C2TS4kpmUD1tlT1RRcgtRD2tL45gSlu3fRyBoAQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/store@2.28.0':
-    resolution: {integrity: sha512-+9u9i4Nn5mEfbTVE4mUt63xU2l4qD6DZ3XS9l6a9oFpg7k9x8wkFYdXyTi0gtHTjVbf6Cn72joNQ5Otkl+osEA==}
+  '@liff/server-api@2.32.0':
+    resolution: {integrity: sha512-9dx1gG4Bt3um2HU1hNQG8i+bCHhGV2RcJGwPiI4yJBMz1EUkGcy1av8541wp/lRtmbueaimZnL0DF0+9DhmnkQ==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/sub-window@2.28.0':
-    resolution: {integrity: sha512-OfJ61qassZrd0Sa+XB/KbT5GzlzB19qRfvsitrJKsio9+I9Mz/hk0Yreat49ZyQ0vlKE5jD2oR0oUgTrPsRT1Q==}
+  '@liff/share-target-picker@2.32.0':
+    resolution: {integrity: sha512-6psqEeC5Ji0J9AaJnvUTwlpSFusYUZQs1mEgduQjk24eFo9/LLlm15z6MY4U4y8NhRC4OJWLK8f7rGdCRRs9/Q==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/types@2.28.0':
-    resolution: {integrity: sha512-7220rE4y8kPLy4psHsD0mKlCsw2dtpqtt7tOHTGDb26vdhmdThx7ETr1kaqnMrMN/j0pvPKsPANuuM3gP3+moA==}
-
-  '@liff/use@2.28.0':
-    resolution: {integrity: sha512-UWKWfOEDtIyflbn01fGfXLtCW8nhHUdbTXweFcEkReqE9PKtic4i6cow2Q7q3g1j1sR8h4t68RBLl0pdak8s5Q==}
+  '@liff/store@2.32.0':
+    resolution: {integrity: sha512-zGcEbgZbqfAHlB4j2x3s87KYRbF3DynbnjEoF3KBsZd6K6XXAgX87rnwts2UgYmF+60M7I1wQetDz3dRd2ChoA==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/util@2.28.0':
-    resolution: {integrity: sha512-dshW3nWTOgzZyTTPVOWoP0GovmYqyOcaavX9aeSlYwdkphcOMK/DnKElD1HB4+pbVz0gu2yEr9in2mNKQcmFcg==}
+  '@liff/sub-window@2.32.0':
+    resolution: {integrity: sha512-aieaRAWQRQV/WkQkezhgJqUPv7OXne2u0meKLvXjQw7O8S82uc/mu84M6D0HUEpqPxJY4inKiYTZ3pbZVUubkg==}
     peerDependencies:
       tslib: ^2.3.0
 
-  '@liff/window-postmessage@2.28.0':
-    resolution: {integrity: sha512-fOEb/AafhSxR390kBecnTfRomj2NgZ6hr2rRU+70llTT8k/axnPEdC4E0ydFw4rdnqEe9RD7Mzket33jUcVbYg==}
+  '@liff/types@2.32.0':
+    resolution: {integrity: sha512-R9n2Sy0+6kdPNReUm62p0RDzWujWsmN1s+sGww7SIxCk0y+/CnAXMpdVOY/qncylrb/XqNW/4V2WOPqkrNf7bg==}
+
+  '@liff/use@2.32.0':
+    resolution: {integrity: sha512-1QFC/OuNS8zcxsK9HzjQPRcOv2Uxr71vncLpfTKv87TWCMx+qKml68usnmqEuXsNUt/a/UUfFfrnerjkyrD9pA==}
+    peerDependencies:
+      tslib: ^2.3.0
+
+  '@liff/util@2.32.0':
+    resolution: {integrity: sha512-uX4CxoFx0mR4krwFJcrLgDk4lUnXV7PL04AfLjBA+9x0BeFkfwCoDXb9l7oC5PAzcruA1xnzBcIZzSc04MaW5Q==}
+    peerDependencies:
+      tslib: ^2.3.0
+
+  '@liff/verify-id-token@2.32.0':
+    resolution: {integrity: sha512-Yl5rqoJ2xaKuYBN/5L8fVaF+9dr8/FSt4rN/4ZH3draAj9/KsBMq+pxGqf90vnQEgSufaURVyemAwbe9G5Hi5A==}
+    peerDependencies:
+      tslib: ^2.3.0
+
+  '@liff/window-postmessage@2.32.0':
+    resolution: {integrity: sha512-0tY8LLuKF18qY08T1EmHbGjgv3gR3M3fH1huc/3CSapRPAEnUHDdHc4kszzf2PHZOmkh9t7b1Gpun8wE1BO+3A==}
     peerDependencies:
       tslib: ^2.3.0
 
@@ -1738,8 +1753,8 @@ packages:
     resolution: {integrity: sha512-1Mdpw/WPS3QP6fGiwPRTL27k8MgmMe7rVKCKsItP/kPzogX7a/X1ipQqk/F6RkorP9DNyJIx590hnVUkfBQf3w==}
     engines: {node: '>=20'}
 
-  '@line/liff@2.28.0':
-    resolution: {integrity: sha512-A2BNIZDbDnBRBVTbHv32YB54T4aUDQyNyXv9y6Ut8w4yZLnGVabHtdhK9HSa1FmfmF9pSxhdSnBzULsDXF3vag==}
+  '@line/liff@2.32.0':
+    resolution: {integrity: sha512-fMNXNCkSjmH+ZVvQmb9P8eoGcx8LH2uf76+kwVdxvTt4TnWlF3UffKzeSdxvIjXvSVTYZIqHvfsROrEtqAcmUQ==}
 
   '@modelcontextprotocol/sdk@1.28.0':
     resolution: {integrity: sha512-gmloF+i+flI8ouQK7MWW4mOwuMh4RePBuPFAEPC6+pdqyWOUMDOixb6qZ69owLJpz6XmyllCouc4t8YWO+E2Nw==}
@@ -4634,458 +4649,491 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@liff/add-to-home-screen@2.28.0(tslib@2.8.1)':
+  '@liff/activity@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/open-window': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/analytics@2.28.0(tslib@2.8.1)':
+  '@liff/add-to-home-screen@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/core': 2.28.0(tslib@2.8.1)
-      '@liff/get-profile': 2.28.0(tslib@2.8.1)
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/open-window': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/check-availability@2.28.0(tslib@2.8.1)':
+  '@liff/analytics@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/core': 2.32.0(tslib@2.8.1)
+      '@liff/get-profile': 2.32.0(tslib@2.8.1)
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/close-window@2.28.0(tslib@2.8.1)':
+  '@liff/calendar@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/consts@2.28.0(tslib@2.8.1)':
+  '@liff/check-availability@2.32.0(tslib@2.8.1)':
+    dependencies:
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      tslib: 2.8.1
+
+  '@liff/close-window@2.32.0(tslib@2.8.1)':
+    dependencies:
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      tslib: 2.8.1
+
+  '@liff/consts@2.32.0(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
 
-  '@liff/core@2.28.0(tslib@2.8.1)':
+  '@liff/core@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/init': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/ready': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/init': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/ready': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/create-shortcut-on-home-screen@2.28.0(tslib@2.8.1)':
+  '@liff/create-shortcut-on-home-screen@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/open-window': 2.28.0(tslib@2.8.1)
-      '@liff/permanent-link': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/open-window': 2.32.0(tslib@2.8.1)
+      '@liff/permanent-link': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/extensions@2.28.0(tslib@2.8.1)':
+  '@liff/extensions@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/add-to-home-screen': 2.28.0(tslib@2.8.1)
-      '@liff/check-availability': 2.28.0(tslib@2.8.1)
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-advertising-id': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/scan-code': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/add-to-home-screen': 2.32.0(tslib@2.8.1)
+      '@liff/check-availability': 2.32.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-advertising-id': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/scan-code': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/util': 2.32.0(tslib@2.8.1)
     transitivePeerDependencies:
       - tslib
 
-  '@liff/get-advertising-id@2.28.0(tslib@2.8.1)':
+  '@liff/get-advertising-id@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/types': 2.28.0
+      '@liff/types': 2.32.0
       tslib: 2.8.1
 
-  '@liff/get-app-language@2.28.0(tslib@2.8.1)':
+  '@liff/get-app-language@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-friendship@2.28.0(tslib@2.8.1)':
+  '@liff/get-friendship@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/permission': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/permission': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-language@2.28.0(tslib@2.8.1)':
+  '@liff/get-language@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-line-version@2.28.0(tslib@2.8.1)':
+  '@liff/get-line-version@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-origins@2.28.0(tslib@2.8.1)':
+  '@liff/get-origins@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-os@2.28.0(tslib@2.8.1)':
+  '@liff/get-os@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-profile@2.28.0(tslib@2.8.1)':
+  '@liff/get-profile@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/permission': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/permission': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/get-version@2.28.0(tslib@2.8.1)':
+  '@liff/get-version@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/hooks@2.28.0(tslib@2.8.1)':
+  '@liff/hooks@2.32.0(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
 
-  '@liff/i18n@2.28.0(tslib@2.8.1)':
+  '@liff/i18n@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/iap@2.28.0(tslib@2.8.1)':
+  '@liff/iap@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/init@2.28.0(tslib@2.8.1)':
+  '@liff/init@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/check-availability': 2.28.0(tslib@2.8.1)
-      '@liff/close-window': 2.28.0(tslib@2.8.1)
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/extensions': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/hooks': 2.28.0(tslib@2.8.1)
-      '@liff/i18n': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/login': 2.28.0(tslib@2.8.1)
-      '@liff/logout': 2.28.0(tslib@2.8.1)
-      '@liff/message-bus': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/permanent-link': 2.28.0(tslib@2.8.1)
-      '@liff/ready': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/check-availability': 2.32.0(tslib@2.8.1)
+      '@liff/close-window': 2.32.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/extensions': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/hooks': 2.32.0(tslib@2.8.1)
+      '@liff/i18n': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/login': 2.32.0(tslib@2.8.1)
+      '@liff/logout': 2.32.0(tslib@2.8.1)
+      '@liff/message-bus': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/permanent-link': 2.32.0(tslib@2.8.1)
+      '@liff/ready': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      '@liff/verify-id-token': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/is-api-available@2.28.0(tslib@2.8.1)':
+  '@liff/is-api-available@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/is-in-client@2.28.0(tslib@2.8.1)':
+  '@liff/is-in-client@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/is-logged-in@2.28.0(tslib@2.8.1)':
+  '@liff/is-logged-in@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/is-sub-window@2.28.0(tslib@2.8.1)':
+  '@liff/is-sub-window@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/liff-types@2.28.0(tslib@2.8.1)':
+  '@liff/liff-types@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/analytics': 2.28.0(tslib@2.8.1)
-      '@liff/close-window': 2.28.0(tslib@2.8.1)
-      '@liff/create-shortcut-on-home-screen': 2.28.0(tslib@2.8.1)
-      '@liff/get-app-language': 2.28.0(tslib@2.8.1)
-      '@liff/get-friendship': 2.28.0(tslib@2.8.1)
-      '@liff/get-language': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-origins': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/get-profile': 2.28.0(tslib@2.8.1)
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/i18n': 2.28.0(tslib@2.8.1)
-      '@liff/iap': 2.28.0(tslib@2.8.1)
-      '@liff/init': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/login': 2.28.0(tslib@2.8.1)
-      '@liff/logout': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/open-window': 2.28.0(tslib@2.8.1)
-      '@liff/permanent-link': 2.28.0(tslib@2.8.1)
-      '@liff/permission': 2.28.0(tslib@2.8.1)
-      '@liff/ready': 2.28.0(tslib@2.8.1)
-      '@liff/request-friendship': 2.28.0(tslib@2.8.1)
-      '@liff/scan-code-v2': 2.28.0(tslib@2.8.1)
-      '@liff/send-messages': 2.28.0(tslib@2.8.1)
-      '@liff/share-target-picker': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/activity': 2.32.0(tslib@2.8.1)
+      '@liff/analytics': 2.32.0(tslib@2.8.1)
+      '@liff/calendar': 2.32.0(tslib@2.8.1)
+      '@liff/close-window': 2.32.0(tslib@2.8.1)
+      '@liff/create-shortcut-on-home-screen': 2.32.0(tslib@2.8.1)
+      '@liff/get-app-language': 2.32.0(tslib@2.8.1)
+      '@liff/get-friendship': 2.32.0(tslib@2.8.1)
+      '@liff/get-language': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-origins': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/get-profile': 2.32.0(tslib@2.8.1)
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/i18n': 2.32.0(tslib@2.8.1)
+      '@liff/iap': 2.32.0(tslib@2.8.1)
+      '@liff/init': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/login': 2.32.0(tslib@2.8.1)
+      '@liff/logout': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/open-window': 2.32.0(tslib@2.8.1)
+      '@liff/permanent-link': 2.32.0(tslib@2.8.1)
+      '@liff/permission': 2.32.0(tslib@2.8.1)
+      '@liff/ready': 2.32.0(tslib@2.8.1)
+      '@liff/request-friendship': 2.32.0(tslib@2.8.1)
+      '@liff/scan-code-v2': 2.32.0(tslib@2.8.1)
+      '@liff/send-messages': 2.32.0(tslib@2.8.1)
+      '@liff/share-target-picker': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
     transitivePeerDependencies:
       - debug
 
-  '@liff/logger@2.28.0(tslib@2.8.1)':
+  '@liff/logger@2.32.0(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
 
-  '@liff/login@2.28.0(tslib@2.8.1)':
+  '@liff/login@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/hooks': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/hooks': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tiny-sha256: 1.0.2
       tslib: 2.8.1
 
-  '@liff/logout@2.28.0(tslib@2.8.1)':
+  '@liff/logout@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/message-bus@2.28.0(tslib@2.8.1)':
+  '@liff/message-bus@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/native-bridge@2.28.0(tslib@2.8.1)':
+  '@liff/native-bridge@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/open-window@2.28.0(tslib@2.8.1)':
+  '@liff/open-window@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/permanent-link@2.28.0(tslib@2.8.1)':
+  '@liff/permanent-link@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/permission@2.28.0(tslib@2.8.1)':
+  '@liff/permission@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      '@liff/verify-id-token': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/ready@2.28.0(tslib@2.8.1)':
+  '@liff/ready@2.32.0(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
 
-  '@liff/request-friendship@2.28.0(tslib@2.8.1)':
+  '@liff/request-friendship@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/scan-code-v2@2.28.0(tslib@2.8.1)':
+  '@liff/scan-code-v2@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/scan-code@2.28.0(tslib@2.8.1)':
+  '@liff/scan-code@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/types': 2.28.0
+      '@liff/types': 2.32.0
       tslib: 2.8.1
 
-  '@liff/send-messages@2.28.0(tslib@2.8.1)':
+  '@liff/send-messages@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/permission': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/permission': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       '@line/bot-sdk': 10.8.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - debug
 
-  '@liff/server-api@2.28.0(tslib@2.8.1)':
+  '@liff/server-api@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/share-target-picker@2.28.0(tslib@2.8.1)':
+  '@liff/share-target-picker@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/analytics': 2.28.0(tslib@2.8.1)
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/send-messages': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
-      '@liff/window-postmessage': 2.28.0(tslib@2.8.1)
+      '@liff/analytics': 2.32.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/send-messages': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      '@liff/window-postmessage': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
     transitivePeerDependencies:
       - debug
 
-  '@liff/store@2.28.0(tslib@2.8.1)':
+  '@liff/store@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/types': 2.28.0
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/types': 2.32.0
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/sub-window@2.28.0(tslib@2.8.1)':
+  '@liff/sub-window@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/close-window': 2.28.0(tslib@2.8.1)
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/message-bus': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/close-window': 2.32.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/message-bus': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/types@2.28.0': {}
+  '@liff/types@2.32.0': {}
 
-  '@liff/use@2.28.0(tslib@2.8.1)':
+  '@liff/use@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/hooks': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
+      '@liff/hooks': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/util@2.28.0(tslib@2.8.1)':
+  '@liff/util@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
-  '@liff/window-postmessage@2.28.0(tslib@2.8.1)':
+  '@liff/verify-id-token@2.32.0(tslib@2.8.1)':
     dependencies:
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/logger': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
+      tslib: 2.8.1
+
+  '@liff/window-postmessage@2.32.0(tslib@2.8.1)':
+    dependencies:
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/logger': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
 
   '@line/bot-sdk@10.8.0':
@@ -5096,47 +5144,49 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  '@line/liff@2.28.0':
+  '@line/liff@2.32.0':
     dependencies:
-      '@liff/analytics': 2.28.0(tslib@2.8.1)
-      '@liff/close-window': 2.28.0(tslib@2.8.1)
-      '@liff/consts': 2.28.0(tslib@2.8.1)
-      '@liff/core': 2.28.0(tslib@2.8.1)
-      '@liff/create-shortcut-on-home-screen': 2.28.0(tslib@2.8.1)
-      '@liff/extensions': 2.28.0(tslib@2.8.1)
-      '@liff/get-app-language': 2.28.0(tslib@2.8.1)
-      '@liff/get-friendship': 2.28.0(tslib@2.8.1)
-      '@liff/get-language': 2.28.0(tslib@2.8.1)
-      '@liff/get-line-version': 2.28.0(tslib@2.8.1)
-      '@liff/get-origins': 2.28.0(tslib@2.8.1)
-      '@liff/get-os': 2.28.0(tslib@2.8.1)
-      '@liff/get-profile': 2.28.0(tslib@2.8.1)
-      '@liff/get-version': 2.28.0(tslib@2.8.1)
-      '@liff/hooks': 2.28.0(tslib@2.8.1)
-      '@liff/i18n': 2.28.0(tslib@2.8.1)
-      '@liff/iap': 2.28.0(tslib@2.8.1)
-      '@liff/init': 2.28.0(tslib@2.8.1)
-      '@liff/is-api-available': 2.28.0(tslib@2.8.1)
-      '@liff/is-in-client': 2.28.0(tslib@2.8.1)
-      '@liff/is-logged-in': 2.28.0(tslib@2.8.1)
-      '@liff/is-sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/liff-types': 2.28.0(tslib@2.8.1)
-      '@liff/login': 2.28.0(tslib@2.8.1)
-      '@liff/logout': 2.28.0(tslib@2.8.1)
-      '@liff/native-bridge': 2.28.0(tslib@2.8.1)
-      '@liff/open-window': 2.28.0(tslib@2.8.1)
-      '@liff/permanent-link': 2.28.0(tslib@2.8.1)
-      '@liff/permission': 2.28.0(tslib@2.8.1)
-      '@liff/ready': 2.28.0(tslib@2.8.1)
-      '@liff/request-friendship': 2.28.0(tslib@2.8.1)
-      '@liff/scan-code-v2': 2.28.0(tslib@2.8.1)
-      '@liff/send-messages': 2.28.0(tslib@2.8.1)
-      '@liff/server-api': 2.28.0(tslib@2.8.1)
-      '@liff/share-target-picker': 2.28.0(tslib@2.8.1)
-      '@liff/store': 2.28.0(tslib@2.8.1)
-      '@liff/sub-window': 2.28.0(tslib@2.8.1)
-      '@liff/use': 2.28.0(tslib@2.8.1)
-      '@liff/util': 2.28.0(tslib@2.8.1)
+      '@liff/activity': 2.32.0(tslib@2.8.1)
+      '@liff/analytics': 2.32.0(tslib@2.8.1)
+      '@liff/calendar': 2.32.0(tslib@2.8.1)
+      '@liff/close-window': 2.32.0(tslib@2.8.1)
+      '@liff/consts': 2.32.0(tslib@2.8.1)
+      '@liff/core': 2.32.0(tslib@2.8.1)
+      '@liff/create-shortcut-on-home-screen': 2.32.0(tslib@2.8.1)
+      '@liff/extensions': 2.32.0(tslib@2.8.1)
+      '@liff/get-app-language': 2.32.0(tslib@2.8.1)
+      '@liff/get-friendship': 2.32.0(tslib@2.8.1)
+      '@liff/get-language': 2.32.0(tslib@2.8.1)
+      '@liff/get-line-version': 2.32.0(tslib@2.8.1)
+      '@liff/get-origins': 2.32.0(tslib@2.8.1)
+      '@liff/get-os': 2.32.0(tslib@2.8.1)
+      '@liff/get-profile': 2.32.0(tslib@2.8.1)
+      '@liff/get-version': 2.32.0(tslib@2.8.1)
+      '@liff/hooks': 2.32.0(tslib@2.8.1)
+      '@liff/i18n': 2.32.0(tslib@2.8.1)
+      '@liff/iap': 2.32.0(tslib@2.8.1)
+      '@liff/init': 2.32.0(tslib@2.8.1)
+      '@liff/is-api-available': 2.32.0(tslib@2.8.1)
+      '@liff/is-in-client': 2.32.0(tslib@2.8.1)
+      '@liff/is-logged-in': 2.32.0(tslib@2.8.1)
+      '@liff/is-sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/liff-types': 2.32.0(tslib@2.8.1)
+      '@liff/login': 2.32.0(tslib@2.8.1)
+      '@liff/logout': 2.32.0(tslib@2.8.1)
+      '@liff/native-bridge': 2.32.0(tslib@2.8.1)
+      '@liff/open-window': 2.32.0(tslib@2.8.1)
+      '@liff/permanent-link': 2.32.0(tslib@2.8.1)
+      '@liff/permission': 2.32.0(tslib@2.8.1)
+      '@liff/ready': 2.32.0(tslib@2.8.1)
+      '@liff/request-friendship': 2.32.0(tslib@2.8.1)
+      '@liff/scan-code-v2': 2.32.0(tslib@2.8.1)
+      '@liff/send-messages': 2.32.0(tslib@2.8.1)
+      '@liff/server-api': 2.32.0(tslib@2.8.1)
+      '@liff/share-target-picker': 2.32.0(tslib@2.8.1)
+      '@liff/store': 2.32.0(tslib@2.8.1)
+      '@liff/sub-window': 2.32.0(tslib@2.8.1)
+      '@liff/use': 2.32.0(tslib@2.8.1)
+      '@liff/util': 2.32.0(tslib@2.8.1)
       tslib: 2.8.1
       whatwg-fetch: 3.6.20
     transitivePeerDependencies:
